@@ -579,3 +579,19 @@ async def handle_hashtags(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"[DEBUG] ❌ No se pudo enviar ni la respuesta de emergencia")
 
     print(f"[DEBUG] 🏁 handle_hashtags terminado para {user.username or user.first_name}")
+    
+from telegram import Update
+from telegram.ext import ContextTypes
+
+async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Devuelve el ID del usuario y del chat"""
+    user = update.effective_user
+    chat = update.effective_chat
+
+    response = f"🆔 <b>Tu ID de usuario:</b> <code>{user.id}</code>\n"
+    response += f"💬 <b>ID del chat:</b> <code>{chat.id}</code>"
+
+    try:
+        await update.message.reply_text(response, parse_mode='HTML')
+    except Exception as e:
+        print(f"[ERROR] No se pudo enviar el ID: {e}")
