@@ -595,3 +595,49 @@ async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(response, parse_mode='HTML')
     except Exception as e:
         print(f"[ERROR] No se pudo enviar el ID: {e}")
+
+from telegram import Update
+from telegram.ext import ContextTypes
+
+# --- COMANDO: /id ---
+async def cmd_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Devuelve el ID del usuario y del chat"""
+    user = update.effective_user
+    chat = update.effective_chat
+
+    response = f"🆔 <b>Tu ID de usuario:</b> <code>{user.id}</code>\n"
+    response += f"💬 <b>ID del chat:</b> <code>{chat.id}</code>"
+
+    try:
+        await update.message.reply_text(response, parse_mode='HTML')
+    except Exception as e:
+        print(f"[ERROR] No se pudo enviar el ID: {e}")
+
+# --- COMANDO: /saludar ---
+async def cmd_saludar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Saluda al usuario con un mensaje personalizado"""
+    user = update.effective_user
+    await update.message.reply_text(f"👋 ¡Hola, {user.first_name}! Bienvenido/a al grupo cinéfilo 🎬")
+
+# --- COMANDO: /rules ---
+async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Muestra las reglas del grupo"""
+    rules_text = """📜 <b>Reglas del Grupo Cinéfilo</b>
+
+1️⃣ Respeto entre miembros  
+2️⃣ Solo contenido de cine y series  
+3️⃣ Marca spoilers con #spoiler  
+4️⃣ No spam o mensajes repetidos  
+5️⃣ Sé cinéfilo, no tóxico 🎥
+
+¡Gracias por mantener este espacio saludable! 🍿"""
+    await update.message.reply_text(rules_text, parse_mode='HTML')
+
+# --- COMANDO: /echo ---
+async def cmd_echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Repite el texto que el usuario le envía"""
+    if context.args:
+        response = " ".join(context.args)
+    else:
+        response = "🔁 Usa el comando así: /echo Tu mensaje aquí"
+    await update.message.reply_text(response)
