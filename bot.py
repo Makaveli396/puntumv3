@@ -14,7 +14,7 @@ from sistema_autorizacion import (
     cmd_status_auth # Asegúrate de que cmd_status_auth también esté si lo usas
 )
 from comandos_basicos import (
-    cmd_start, cmd_help, cmd_id, cmd_echo, cmd_saludar, cmd_rules,
+    cmd_start, cmd_help, cmd_id, cmd_saludar, cmd_rules,
     cmd_about, cmd_info, cmd_contacto, cmd_links, cmd_donate,
     cmd_github, cmd_version, cmd_status, cmd_ping,
     cmd_config, cmd_stats, cmd_broadcast_message
