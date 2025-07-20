@@ -2,3 +2,6 @@ python-telegram-bot[webhooks]==20.3
 httpx
 nest_asyncio
 aiohttp==3.9.1
+python-dotenv  # <--- ¡Añadir esta línea!
+requests       # <--- ¡Añadir esta línea!
+yt-dlp         # <--- ¡Añadir esta línea si usarás la función de YouTube!
