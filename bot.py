@@ -14,7 +14,7 @@ from sistema_autorizacion import (
     cmd_status_auth # Asegúrate de que cmd_status_auth también esté si lo usas
 )
 from comandos_basicos import (
-    cmd_start, cmd_help, cmd_id, cmd_saludar, cmd_rules,
+    cmd_start, cmd_help, cmd_id, cmd_rules,
     cmd_about, cmd_info, cmd_contacto, cmd_links, cmd_donate,
     cmd_github, cmd_version, cmd_status, cmd_ping,
     cmd_config, cmd_stats, cmd_broadcast_message
@@ -204,7 +204,7 @@ async def main():
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("help", cmd_help))
     application.add_handler(CommandHandler("id", auth_required(cmd_id)))
-    application.add_handler(CommandHandler("saludar", cmd_saludar))
+    
     application.add_handler(CommandHandler("rules", cmd_rules))
     application.add_handler(CommandHandler("about", cmd_about))
     application.add_handler(CommandHandler("info", cmd_info))
