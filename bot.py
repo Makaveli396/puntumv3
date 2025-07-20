@@ -8,7 +8,7 @@ from telegram.ext import (
 )
 
 # Importaciones de tus módulos locales
-from handlers.auth import auth_required, setup_admin_list
+from sistema_autorizacion import auth_required, setup_admin_list # <-- CAMBIO AQUI
 from comandos_basicos import (
     cmd_start, cmd_help, cmd_id, cmd_echo, cmd_saludar, cmd_rules,
     cmd_about, cmd_info, cmd_contacto, cmd_links, cmd_donate,
