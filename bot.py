@@ -12,7 +12,8 @@ from sistema_autorizacion import (
     create_auth_tables, is_chat_authorized, authorize_chat,
     auth_required, cmd_solicitar_autorizacion, cmd_aprobar_grupo, cmd_ver_solicitudes,
     cmd_status_auth # Asegúrate de que cmd_status_auth también esté si lo usas
-)from comandos_basicos import (
+)
+from comandos_basicos import (
     cmd_start, cmd_help, cmd_id, cmd_echo, cmd_saludar, cmd_rules,
     cmd_about, cmd_info, cmd_contacto, cmd_links, cmd_donate,
     cmd_github, cmd_version, cmd_status, cmd_ping,
