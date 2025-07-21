@@ -1,30 +1,51 @@
 # db.py
-import sqlite3
-from datetime import datetime
-import logging
 import os
+import logging
+from datetime import datetime
 from contextlib import contextmanager
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
-# Configuración para Render
-DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///tmp/bot_database.db')
+# Configuración para Render con PostgreSQL
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+def get_db_connection():
+    """Crea una conexión a la base de datos"""
+    if DATABASE_URL:
+        # Parsear URL de PostgreSQL
+        result = urlparse(DATABASE_URL)
+        return psycopg2.connect(
+            database=result.path[1:],
+            user=result.username,
+            password=result.password,
+            host=result.hostname,
+            port=result.port
+        )
+    else:
+        # Fallback para desarrollo local
+        import sqlite3
+        conn = sqlite3.connect('/tmp/bot_database.db')
+        conn.row_factory = sqlite3.Row
+        return conn
 
 @contextmanager
 def db_session():
     """Manejador de contexto para conexiones a la base de datos"""
     conn = None
     try:
-        if DATABASE_URL.startswith('sqlite:///'):
-            db_path = DATABASE_URL.split('sqlite:///')[1]
-            conn = sqlite3.connect(f'/tmp/{db_path}')
-        else:
-            conn = sqlite3.connect(DATABASE_URL)
+        conn = get_db_connection()
+        if DATABASE_URL:  # PostgreSQL
+            conn.cursor_factory = RealDictCursor
+            cursor = conn.cursor()
+        else:  # SQLite
+            cursor = conn.cursor()
         
-        conn.row_factory = sqlite3.Row
         yield conn
         conn.commit()
-    except sqlite3.Error as e:
+    except Exception as e:
         logger.error(f"Error en la sesión de DB: {e}")
         if conn:
             conn.rollback()
@@ -37,126 +58,215 @@ def apply_migrations(conn):
     """Aplica migraciones necesarias a la base de datos"""
     cursor = conn.cursor()
     
-    # Migración para la tabla de retos semanales
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='weekly_challenges'")
-    if not cursor.fetchone():
+    # Determinar si es PostgreSQL o SQLite
+    is_postgresql = DATABASE_URL is not None
+    
+    if is_postgresql:
+        # Migración para PostgreSQL
         cursor.execute("""
-            CREATE TABLE weekly_challenges (
-                id INTEGER PRIMARY KEY,
-                challenge_type TEXT NOT NULL,
+            CREATE TABLE IF NOT EXISTS weekly_challenges (
+                id SERIAL PRIMARY KEY,
+                challenge_type VARCHAR(50) NOT NULL,
                 challenge_value TEXT NOT NULL,
-                start_date TEXT NOT NULL,
-                end_date TEXT NOT NULL,
-                is_active BOOLEAN DEFAULT 1
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                is_active BOOLEAN DEFAULT TRUE
             )
         """)
-        logger.info("Tabla weekly_challenges creada")
-
-    # Migración para user_challenges
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user_challenges'")
-    if not cursor.fetchone():
+        
         cursor.execute("""
-            CREATE TABLE user_challenges (
-                user_id INTEGER NOT NULL,
+            CREATE TABLE IF NOT EXISTS user_challenges (
+                user_id BIGINT NOT NULL,
                 challenge_id INTEGER NOT NULL,
-                completed BOOLEAN DEFAULT 0,
-                completion_date TEXT,
+                completed BOOLEAN DEFAULT FALSE,
+                completion_date TIMESTAMP,
                 PRIMARY KEY (user_id, challenge_id),
                 FOREIGN KEY (challenge_id) REFERENCES weekly_challenges(id)
             )
         """)
-        logger.info("Tabla user_challenges creada")
+    else:
+        # Migración para SQLite (desarrollo)
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='weekly_challenges'")
+        if not cursor.fetchone():
+            cursor.execute("""
+                CREATE TABLE weekly_challenges (
+                    id INTEGER PRIMARY KEY,
+                    challenge_type TEXT NOT NULL,
+                    challenge_value TEXT NOT NULL,
+                    start_date TEXT NOT NULL,
+                    end_date TEXT NOT NULL,
+                    is_active BOOLEAN DEFAULT 1
+                )
+            """)
 
-    # Verificar columnas faltantes en points
-    cursor.execute("PRAGMA table_info(points)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if 'is_challenge_bonus' not in columns:
-        cursor.execute("ALTER TABLE points ADD COLUMN is_challenge_bonus INTEGER DEFAULT 0")
-        logger.info("Columna is_challenge_bonus añadida a points")
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user_challenges'")
+        if not cursor.fetchone():
+            cursor.execute("""
+                CREATE TABLE user_challenges (
+                    user_id INTEGER NOT NULL,
+                    challenge_id INTEGER NOT NULL,
+                    completed BOOLEAN DEFAULT 0,
+                    completion_date TEXT,
+                    PRIMARY KEY (user_id, challenge_id),
+                    FOREIGN KEY (challenge_id) REFERENCES weekly_challenges(id)
+                )
+            """)
+
+    logger.info("Migraciones aplicadas correctamente")
 
 def initialize_db():
     """Inicializa la base de datos con todas las tablas necesarias"""
     with db_session() as conn:
         try:
             cursor = conn.cursor()
+            is_postgresql = DATABASE_URL is not None
 
-            # Tablas principales
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS points (
-                    user_id INTEGER,
-                    username TEXT,
-                    points INTEGER,
-                    hashtag TEXT,
-                    timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-                    chat_id INTEGER,
-                    message_id INTEGER,
-                    is_challenge_bonus INTEGER DEFAULT 0
-                )
-            """)
+            if is_postgresql:
+                # Tablas para PostgreSQL
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS points (
+                        id SERIAL PRIMARY KEY,
+                        user_id BIGINT NOT NULL,
+                        username VARCHAR(255),
+                        points INTEGER NOT NULL,
+                        hashtag VARCHAR(100),
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        chat_id BIGINT,
+                        message_id INTEGER,
+                        is_challenge_bonus BOOLEAN DEFAULT FALSE
+                    )
+                """)
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS user_achievements (
-                    user_id INTEGER,
-                    achievement_id INTEGER,
-                    date TEXT DEFAULT CURRENT_DATE,
-                    PRIMARY KEY (user_id, achievement_id)
-                )
-            """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS user_achievements (
+                        user_id BIGINT NOT NULL,
+                        achievement_id INTEGER NOT NULL,
+                        date DATE DEFAULT CURRENT_DATE,
+                        PRIMARY KEY (user_id, achievement_id)
+                    )
+                """)
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY,
-                    username TEXT,
-                    points INTEGER DEFAULT 0,
-                    count INTEGER DEFAULT 0,
-                    level INTEGER DEFAULT 1,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        id BIGINT PRIMARY KEY,
+                        username VARCHAR(255),
+                        points INTEGER DEFAULT 0,
+                        count INTEGER DEFAULT 0,
+                        level INTEGER DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS chat_config (
-                    chat_id INTEGER PRIMARY KEY,
-                    chat_name TEXT,
-                    rankings_enabled BOOLEAN DEFAULT 1,
-                    challenges_enabled BOOLEAN DEFAULT 1,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS chat_config (
+                        chat_id BIGINT PRIMARY KEY,
+                        chat_name VARCHAR(255),
+                        rankings_enabled BOOLEAN DEFAULT TRUE,
+                        challenges_enabled BOOLEAN DEFAULT TRUE,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                # Índices para PostgreSQL
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_points_user ON points(user_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_points_hashtag ON points(hashtag)")
+                
+            else:
+                # Tablas para SQLite (desarrollo local)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS points (
+                        user_id INTEGER,
+                        username TEXT,
+                        points INTEGER,
+                        hashtag TEXT,
+                        timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                        chat_id INTEGER,
+                        message_id INTEGER,
+                        is_challenge_bonus INTEGER DEFAULT 0
+                    )
+                """)
+
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS user_achievements (
+                        user_id INTEGER,
+                        achievement_id INTEGER,
+                        date TEXT DEFAULT CURRENT_DATE,
+                        PRIMARY KEY (user_id, achievement_id)
+                    )
+                """)
+
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        id INTEGER PRIMARY KEY,
+                        username TEXT,
+                        points INTEGER DEFAULT 0,
+                        count INTEGER DEFAULT 0,
+                        level INTEGER DEFAULT 1,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS chat_config (
+                        chat_id INTEGER PRIMARY KEY,
+                        chat_name TEXT,
+                        rankings_enabled BOOLEAN DEFAULT 1,
+                        challenges_enabled BOOLEAN DEFAULT 1,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                # Índices para SQLite
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_points_user ON points(user_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_points_hashtag ON points(hashtag)")
 
             # Aplicar migraciones
             apply_migrations(conn)
-
-            # Índices para mejorar rendimiento
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_points_user ON points(user_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_points_hashtag ON points(hashtag)")
             
             logger.info("Base de datos inicializada correctamente")
-        except sqlite3.Error as e:
+        except Exception as e:
             logger.error(f"Error al inicializar DB: {e}")
             raise
 
-# Funciones principales con el nuevo manejador de contexto
+# Funciones principales (adaptadas para ambas DB)
 def add_points(user_id, username, points, hashtag=None, message_text=None, chat_id=None, message_id=None, is_challenge_bonus=False, context=None):
     """Añade puntos a un usuario"""
     with db_session() as conn:
         cursor = conn.cursor()
+        is_postgresql = DATABASE_URL is not None
         
         # Insertar puntos
-        cursor.execute("""
-            INSERT INTO points (user_id, username, points, hashtag, chat_id, message_id, is_challenge_bonus)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (user_id, username, points, hashtag, chat_id, message_id, int(is_challenge_bonus)))
+        if is_postgresql:
+            cursor.execute("""
+                INSERT INTO points (user_id, username, points, hashtag, chat_id, message_id, is_challenge_bonus)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (user_id, username, points, hashtag, chat_id, message_id, is_challenge_bonus))
+            
+            # Actualizar usuario en PostgreSQL
+            cursor.execute("""
+                INSERT INTO users (id, username, points, count, level)
+                VALUES (%s, %s, %s, 1, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    username = EXCLUDED.username,
+                    points = users.points + %s,
+                    count = users.count + 1,
+                    level = %s
+            """, (user_id, username, points, calculate_level(get_user_total_points(user_id) + points), points, calculate_level(get_user_total_points(user_id) + points)))
+        else:
+            cursor.execute("""
+                INSERT INTO points (user_id, username, points, hashtag, chat_id, message_id, is_challenge_bonus)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, username, points, hashtag, chat_id, message_id, int(is_challenge_bonus)))
 
-        # Actualizar usuario
-        cursor.execute("""
-            INSERT OR REPLACE INTO users (id, username, points, count, level, created_at)
-            VALUES (?, ?, 
-                   COALESCE((SELECT points FROM users WHERE id = ?), 0) + ?,
-                   COALESCE((SELECT count FROM users WHERE id = ?), 0) + 1,
-                   ?,
-                   COALESCE((SELECT created_at FROM users WHERE id = ?), CURRENT_TIMESTAMP))
-        """, (user_id, username, user_id, points, user_id, calculate_level(get_user_total_points(user_id) + points), user_id))
+            # Actualizar usuario en SQLite
+            cursor.execute("""
+                INSERT OR REPLACE INTO users (id, username, points, count, level, created_at)
+                VALUES (?, ?, 
+                       COALESCE((SELECT points FROM users WHERE id = ?), 0) + ?,
+                       COALESCE((SELECT count FROM users WHERE id = ?), 0) + 1,
+                       ?,
+                       COALESCE((SELECT created_at FROM users WHERE id = ?), CURRENT_TIMESTAMP))
+            """, (user_id, username, user_id, points, user_id, calculate_level(get_user_total_points(user_id) + points), user_id))
 
         logger.info(f"Puntos añadidos: {user_id} +{points} por {hashtag}")
 
@@ -164,20 +274,39 @@ def add_achievement(user_id: int, achievement_id: int):
     """Añade un logro a un usuario"""
     with db_session() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            INSERT OR IGNORE INTO user_achievements (user_id, achievement_id)
-            VALUES (?, ?)
-        """, (user_id, achievement_id))
+        is_postgresql = DATABASE_URL is not None
+        
+        if is_postgresql:
+            cursor.execute("""
+                INSERT INTO user_achievements (user_id, achievement_id)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id, achievement_id) DO NOTHING
+            """, (user_id, achievement_id))
+        else:
+            cursor.execute("""
+                INSERT OR IGNORE INTO user_achievements (user_id, achievement_id)
+                VALUES (?, ?)
+            """, (user_id, achievement_id))
+        
         logger.info(f"Logro {achievement_id} añadido al usuario {user_id}")
 
 def get_user_total_points(user_id: int) -> int:
     """Obtiene los puntos totales de un usuario"""
     with db_session() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT COALESCE(SUM(points), 0) FROM points WHERE user_id = ?
-        """, (user_id,))
-        return cursor.fetchone()[0]
+        is_postgresql = DATABASE_URL is not None
+        
+        if is_postgresql:
+            cursor.execute("""
+                SELECT COALESCE(SUM(points), 0) FROM points WHERE user_id = %s
+            """, (user_id,))
+        else:
+            cursor.execute("""
+                SELECT COALESCE(SUM(points), 0) FROM points WHERE user_id = ?
+            """, (user_id,))
+        
+        result = cursor.fetchone()
+        return result[0] if result else 0
 
 # Funciones de nivel (sin cambios)
 def calculate_level(points: int) -> int:
@@ -197,31 +326,41 @@ def get_level_info(level: int) -> dict:
     }
     return level_data.get(level, level_data[1])
 
-# Funciones optimizadas con el nuevo manejador
 def get_user_stats(user_id: int):
     """Obtiene estadísticas completas del usuario"""
     with db_session() as conn:
         cursor = conn.cursor()
+        is_postgresql = DATABASE_URL is not None
         
         # Datos básicos
-        cursor.execute("""
-            SELECT COALESCE(SUM(points), 0) as total_points,
-                  COUNT(*) as total_contributions,
-                  username,
-                  MIN(timestamp) as member_since
-            FROM points WHERE user_id = ?
-        """, (user_id,))
+        if is_postgresql:
+            cursor.execute("""
+                SELECT COALESCE(SUM(points), 0) as total_points,
+                      COUNT(*) as total_contributions,
+                      username,
+                      MIN(timestamp) as member_since
+                FROM points WHERE user_id = %s
+            """, (user_id,))
+        else:
+            cursor.execute("""
+                SELECT COALESCE(SUM(points), 0) as total_points,
+                      COUNT(*) as total_contributions,
+                      username,
+                      MIN(timestamp) as member_since
+                FROM points WHERE user_id = ?
+            """, (user_id,))
+        
         result = cursor.fetchone()
 
         if not result or result[0] == 0:
             return None
 
         stats = {
-            "username": result["username"],
-            "points": result["total_points"],
-            "count": result["total_contributions"],
-            "member_since": result["member_since"],
-            "level": calculate_level(result["total_points"]),
+            "username": result[2] if is_postgresql else result["username"],
+            "points": result[0] if is_postgresql else result["total_points"],
+            "count": result[1] if is_postgresql else result["total_contributions"],
+            "member_since": str(result[3] if is_postgresql else result["member_since"]),
+            "level": calculate_level(result[0] if is_postgresql else result["total_points"]),
             "hashtag_counts": {},
             "active_days": set(),
             "achievements": []
@@ -233,19 +372,34 @@ def get_user_stats(user_id: int):
         stats["points_to_next"] = max(0, level_info["next_points"] - stats["points"]) if level_info["next_points"] else 0
 
         # Hashtags más usados
-        cursor.execute("""
-            SELECT hashtag, COUNT(*) as count FROM points
-            WHERE user_id = ? GROUP BY hashtag ORDER BY count DESC
-        """, (user_id,))
-        stats["hashtag_counts"] = {row["hashtag"]: row["count"] for row in cursor.fetchall()}
+        if is_postgresql:
+            cursor.execute("""
+                SELECT hashtag, COUNT(*) as count FROM points
+                WHERE user_id = %s GROUP BY hashtag ORDER BY count DESC
+            """, (user_id,))
+        else:
+            cursor.execute("""
+                SELECT hashtag, COUNT(*) as count FROM points
+                WHERE user_id = ? GROUP BY hashtag ORDER BY count DESC
+            """, (user_id,))
+        
+        stats["hashtag_counts"] = {row[0]: row[1] for row in cursor.fetchall()}
 
         # Días activos
-        cursor.execute("SELECT DISTINCT DATE(timestamp) FROM points WHERE user_id = ?", (user_id,))
-        stats["active_days"] = {row[0] for row in cursor.fetchall()}
+        if is_postgresql:
+            cursor.execute("SELECT DISTINCT DATE(timestamp) FROM points WHERE user_id = %s", (user_id,))
+        else:
+            cursor.execute("SELECT DISTINCT DATE(timestamp) FROM points WHERE user_id = ?", (user_id,))
+        
+        stats["active_days"] = {str(row[0]) for row in cursor.fetchall()}
 
         # Logros
-        cursor.execute("SELECT achievement_id FROM user_achievements WHERE user_id = ?", (user_id,))
-        stats["achievements"] = [row["achievement_id"] for row in cursor.fetchall()]
+        if is_postgresql:
+            cursor.execute("SELECT achievement_id FROM user_achievements WHERE user_id = %s", (user_id,))
+        else:
+            cursor.execute("SELECT achievement_id FROM user_achievements WHERE user_id = ?", (user_id,))
+        
+        stats["achievements"] = [row[0] for row in cursor.fetchall()]
 
         return stats
 
@@ -253,53 +407,49 @@ def get_top10():
     """Obtiene el top 10 de usuarios"""
     with db_session() as conn:
         cursor = conn.cursor()
+        is_postgresql = DATABASE_URL is not None
+        
         try:
-            cursor.execute("""
-                SELECT username, SUM(points) as total_points, user_id
-                FROM points GROUP BY user_id ORDER BY total_points DESC LIMIT 10
-            """)
+            if is_postgresql:
+                cursor.execute("""
+                    SELECT username, SUM(points) as total_points, user_id
+                    FROM points GROUP BY user_id, username ORDER BY total_points DESC LIMIT 10
+                """)
+            else:
+                cursor.execute("""
+                    SELECT username, SUM(points) as total_points, user_id
+                    FROM points GROUP BY user_id ORDER BY total_points DESC LIMIT 10
+                """)
+            
+            results = cursor.fetchall()
             return [
-                (row["username"], row["total_points"], calculate_level(row["total_points"]))
-                for row in cursor.fetchall()
+                (row[0], row[1], calculate_level(row[1]))
+                for row in results
             ]
-        except sqlite3.Error as e:
+        except Exception as e:
             logger.error(f"Error en get_top10: {e}")
             return []
 
-# Funciones de configuración de chat
-def set_chat_config(chat_id: int, chat_name: str, rankings_enabled: bool = True, challenges_enabled: bool = True):
-    with db_session() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT OR REPLACE INTO chat_config 
-            (chat_id, chat_name, rankings_enabled, challenges_enabled)
-            VALUES (?, ?, ?, ?)
-        """, (chat_id, chat_name, rankings_enabled, challenges_enabled))
-
-def get_chat_config(chat_id: int):
-    with db_session() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT chat_name, rankings_enabled, challenges_enabled
-            FROM chat_config WHERE chat_id = ?
-        """, (chat_id,))
-        result = cursor.fetchone()
-        return {
-            "chat_name": result["chat_name"],
-            "rankings_enabled": bool(result["rankings_enabled"]),
-            "challenges_enabled": bool(result["challenges_enabled"])
-        } if result else None
-
 def get_configured_chats():
+    """Obtiene chats configurados"""
     with db_session() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT chat_id, chat_name, rankings_enabled, challenges_enabled
-            FROM chat_config WHERE rankings_enabled = 1 OR challenges_enabled = 1
-        """)
+        is_postgresql = DATABASE_URL is not None
+        
+        if is_postgresql:
+            cursor.execute("""
+                SELECT chat_id, chat_name, rankings_enabled, challenges_enabled
+                FROM chat_config WHERE rankings_enabled = TRUE OR challenges_enabled = TRUE
+            """)
+        else:
+            cursor.execute("""
+                SELECT chat_id, chat_name, rankings_enabled, challenges_enabled
+                FROM chat_config WHERE rankings_enabled = 1 OR challenges_enabled = 1
+            """)
+        
         return [{
-            "chat_id": row["chat_id"],
-            "chat_name": row["chat_name"],
-            "rankings_enabled": bool(row["rankings_enabled"]),
-            "challenges_enabled": bool(row["challenges_enabled"])
+            "chat_id": row[0],
+            "chat_name": row[1],
+            "rankings_enabled": bool(row[2]),
+            "challenges_enabled": bool(row[3])
         } for row in cursor.fetchall()]
