@@ -1,5 +1,5 @@
 python-telegram-bot==20.3
 apscheduler==3.10.1
-tmdbv3api==2.0.6
+tmdbv3api==1.9.0  # Última versión estable disponible
 python-dotenv==1.0.0
 requests==2.31.0
