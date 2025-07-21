@@ -126,30 +126,30 @@ def main():
 
     # --- Comandos de autorización ---
     app.add_handler(CommandHandler("solicitar", cmd_solicitar_autorizacion))
-    app.add_handler(CommandHandler("aprobar", auth_required("admin")(cmd_aprobar_grupo)))
-    app.add_handler(CommandHandler("solicitudes", auth_required("admin")(cmd_ver_solicitudes)))
     
-    # --- Comandos administrativos ---
-    app.add_handler(CommandHandler("addadmin", auth_required("admin")(cmd_addadmin)))
-    app.add_handler(CommandHandler("removeadmin", auth_required("admin")(cmd_removeadmin)))
-    app.add_handler(CommandHandler("listadmins", auth_required("admin")(cmd_listadmins)))
-    app.add_handler(CommandHandler("revocar", auth_required("admin")(cmd_revocar)))
+    # --- Comandos administrativos (con decorador correcto) ---
+    app.add_handler(CommandHandler("aprobar", cmd_aprobar_grupo))
+    app.add_handler(CommandHandler("solicitudes", cmd_ver_solicitudes))
+    app.add_handler(CommandHandler("addadmin", cmd_addadmin))
+    app.add_handler(CommandHandler("removeadmin", cmd_removeadmin))
+    app.add_handler(CommandHandler("listadmins", cmd_listadmins))
+    app.add_handler(CommandHandler("revocar", cmd_revocar))
 
-    # --- Comandos básicos ---
-    app.add_handler(CommandHandler("start", auth_required(cmd_start)))
-    app.add_handler(CommandHandler("help", auth_required(cmd_help)))
-    app.add_handler(CommandHandler("ranking", auth_required(cmd_ranking)))
-    app.add_handler(CommandHandler("miperfil", auth_required(cmd_miperfil)))
-    app.add_handler(CommandHandler("reto", auth_required(cmd_reto)))
+    # --- Comandos básicos (con decorador de autorización) ---
+    app.add_handler(CommandHandler("start", auth_required()(cmd_start)))
+    app.add_handler(CommandHandler("help", auth_required()(cmd_help)))
+    app.add_handler(CommandHandler("ranking", auth_required()(cmd_ranking)))
+    app.add_handler(CommandHandler("miperfil", auth_required()(cmd_miperfil)))
+    app.add_handler(CommandHandler("reto", auth_required()(cmd_reto)))
 
-    # --- Comandos de juegos ---
-    app.add_handler(CommandHandler("cinematrivia", auth_required(cmd_cinematrivia)))
-    app.add_handler(CommandHandler("adivinapelicula", auth_required(cmd_adivinapelicula)))
-    app.add_handler(CommandHandler("emojipelicula", auth_required(cmd_emojipelicula)))
-    app.add_handler(CommandHandler("pista", auth_required(cmd_pista)))
-    app.add_handler(CommandHandler("rendirse", auth_required(cmd_rendirse)))
-    app.add_handler(CommandHandler("estadisticasjuegos", auth_required(cmd_estadisticasjuegos)))
-    app.add_handler(CommandHandler("topjugadores", auth_required(cmd_top_jugadores)))
+    # --- Comandos de juegos (con decorador de autorización) ---
+    app.add_handler(CommandHandler("cinematrivia", auth_required()(cmd_cinematrivia)))
+    app.add_handler(CommandHandler("adivinapelicula", auth_required()(cmd_adivinapelicula)))
+    app.add_handler(CommandHandler("emojipelicula", auth_required()(cmd_emojipelicula)))
+    app.add_handler(CommandHandler("pista", auth_required()(cmd_pista)))
+    app.add_handler(CommandHandler("rendirse", auth_required()(cmd_rendirse)))
+    app.add_handler(CommandHandler("estadisticasjuegos", auth_required()(cmd_estadisticasjuegos)))
+    app.add_handler(CommandHandler("topjugadores", auth_required()(cmd_top_jugadores)))
 
     # ======================
     #  MANEJADORES DE MENSAJES
@@ -157,12 +157,12 @@ def main():
     
     # Manejador de hashtags (prioridad alta)
     hashtag_filter = filters.TEXT & ~filters.COMMAND & filters.Regex(r'#\w+')
-    app.add_handler(MessageHandler(hashtag_filter, auth_required(handle_hashtags)))
+    app.add_handler(MessageHandler(hashtag_filter, auth_required()(handle_hashtags)))
     logger.info("✅ Manejador de hashtags configurado")
     
     # Manejadores de callbacks y mensajes (baja prioridad)
     app.add_handler(CallbackQueryHandler(handle_trivia_callback))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, auth_required(handle_game_message)))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, auth_required()(handle_game_message)))
     logger.info("✅ Manejadores de mensajes configurados")
 
     # ======================
