@@ -3,3 +3,4 @@ apscheduler==3.10.1
 tmdbv3api==1.9.0  # Última versión estable disponible
 python-dotenv==1.0.0
 requests==2.31.0
+setuptools<81.0.0  # Evita el warning de deprecated
