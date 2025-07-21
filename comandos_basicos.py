@@ -86,3 +86,43 @@ async def cmd_github(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- COMANDO: /version ---
 async def cmd_version(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔢 Versión actual: PuntumBot v3.0.0")
+
+    from weekly_challenges import get_challenge_text, generate_new_challenge
+
+# --- COMANDO: /reto ---
+async def cmd_reto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mensaje = get_challenge_text()
+    await update.message.reply_text(mensaje, parse_mode='HTML')
+
+# --- COMANDO: /generarreto ---
+async def cmd_generarreto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    chat = update.effective_chat
+
+    # Solo admins pueden usarlo
+    member = await chat.get_member(user.id)
+    if not member.status in ("administrator", "creator"):
+        await update.message.reply_text("⛔ Solo administradores pueden generar un nuevo reto.")
+        return
+
+    reto = generate_new_challenge()
+
+    if not reto:
+        await update.message.reply_text("⚠️ No se pudo generar un nuevo reto en este momento.")
+        return
+
+    tipo_str = {
+        "genre": "🎭 Género",
+        "director": "🎬 Director",
+        "decade": "📽️ Década"
+    }.get(reto["type"], reto["type"])
+
+    mensaje = f"""✅ <b>Nuevo reto generado</b>
+
+📅 <b>Del:</b> {reto["start"]} <b>al</b> {reto["end"]}
+{tipo_str}: <b>{reto["value"]}</b>
+
+¡A participar cinéfilos! 🎥🍿
+"""
+    await update.message.reply_text(mensaje, parse_mode='HTML')
+
