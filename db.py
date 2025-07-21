@@ -3,7 +3,7 @@ import os
 import logging
 from datetime import datetime
 from contextlib import contextmanager
-import psycopg2
+import psycopg2-binary as psycopg2
 from psycopg2.extras import RealDictCursor
 from urllib.parse import urlparse
 
