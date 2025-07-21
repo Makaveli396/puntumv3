@@ -10,20 +10,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
 
 # Módulos personalizados
-from db import initialize_db, add_points, get_user_stats, get_top10
+from db import initialize_db, add_points, get_user_stats, get_top10, add_achievement, get_configured_chats
 from hashtags import handle_hashtags, VALID_HASHTAGS
-from weekly_challenges import (
-    generate_new_challenge, 
-    get_current_challenge, 
-    check_challenge_completion,
-    CHALLENGE_TYPES  # Asegúrate de exportarlo en weekly_challenges.py
-)
+from weekly_challenges import generate_new_challenge, get_current_challenge, check_challenge_completion
 from generador_trivia import generar_pregunta
-from comandos_basicos import (
-    cmd_start, cmd_help, cmd_hashtags, cmd_reto, cmd_generarreto,
-    cmd_puntos, cmd_top10, cmd_trivia, cmd_adivina, cmd_logros,
-    cmd_id, cmd_saludar, cmd_rules, cmd_about
-)
+from comandos_basicos import cmd_id, cmd_rules, cmd_about
 
 # Configuración de logging
 logging.basicConfig(
@@ -85,15 +76,16 @@ async def cmd_reto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ No hay retos activos ahora.")
         return
     
-    challenge_info = {
+    challenge_types = {
         "genre": "🎭 Género",
         "director": "🎬 Director",
         "decade": "📅 Década"
-    }[challenge["challenge_type"]]
+    }
     
     response = (
         f"🎬 <b>Reto Semanal</b> (válido hasta {challenge['end_date']})\n\n"
-        f"{challenge_info}: <b>{challenge['challenge_value']}</b>\n\n"
+        f"{challenge_types.get(challenge['challenge_type'])}: "
+        f"<b>{challenge['challenge_value']}</b>\n\n"
         f"Para completarlo:\n"
         f"1. Usa #RetoSemanal + #pelicula o #serie\n"
         f"2. Gana <b>50 puntos extra</b>!"
@@ -108,7 +100,7 @@ async def cmd_puntos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ℹ️ Aún no tienes puntos. ¡Participa usando hashtags!")
         return
     
-    level_info = {
+    level_names = {
         1: "🌱 Novato",
         2: "🎭 Aficionado",
         3: "🎬 Crítico",
@@ -118,7 +110,7 @@ async def cmd_puntos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     response = (
         f"📊 <b>Estadísticas de {user.first_name}</b>\n\n"
-        f"⭐ Nivel: {level_info.get(stats['level'], 'N/A')}\n"
+        f"⭐ Nivel: {level_names.get(stats['level'], 'N/A')}\n"
         f"💎 Puntos: {stats['points']}\n"
         f"🎯 Para siguiente nivel: {stats['points_to_next']} pts\n"
         f"📅 Miembro desde: {stats['member_since'][:10]}"
@@ -152,7 +144,6 @@ async def cmd_trivia(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def cmd_adivina(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Implementación simplificada (puedes expandirla)
     await update.message.reply_text(
         "🎥 <b>Adivina la Película</b>\n\n"
         "Próximamente: ¡Fotogramas y pistas!",
@@ -176,7 +167,7 @@ async def cmd_logros(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(response, parse_mode="HTML")
 
 def check_achievements(user_id: int):
-    stats = get_user_stats(user_id)
+    stats = get_user_stats(user.id)
     if not stats:
         return []
     
@@ -199,12 +190,12 @@ async def weekly_challenge_task(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=chat["chat_id"],
                 text=f"🎬 <b>Nuevo Reto Semanal!</b>\n\n"
-                     f"🏆 {new_challenge['value']}\n\n"
+                     f"🏆 {new_challenge['challenge_value']}\n\n"
                      f"Usa #RetoSemanal para participar!",
                 parse_mode="HTML"
             )
         except Exception as e:
-            logger.error(f"Error enviando reto a chat {chat['id']}: {e}")
+            logger.error(f"Error enviando reto a chat {chat['chat_id']}: {e}")
 
 # --- CONFIGURACIÓN DEL BOT ---
 async def post_init(application):
@@ -218,12 +209,15 @@ async def post_init(application):
         BotCommand("top10", "Mejores usuarios"),
         BotCommand("trivia", "Trivia de cine"),
         BotCommand("adivina", "Adivina la película"),
-        BotCommand("logros", "Tus logros")
+        BotCommand("logros", "Tus logros"),
+        BotCommand("id", "Muestra tu ID"),
+        BotCommand("rules", "Reglas del grupo"),
+        BotCommand("about", "Acerca del bot")
     ]
     await application.bot.set_my_commands(commands)
     
     # Inicializar base de datos
-    await initialize_db()
+    initialize_db()
     
     # Programar tarea semanal
     scheduler = AsyncIOScheduler()
@@ -248,14 +242,12 @@ async def main():
         "help": cmd_help,
         "hashtags": cmd_hashtags,
         "reto": cmd_reto,
-        "generarreto": cmd_generarreto,  # 👈 NUEVO
         "puntos": cmd_puntos,
         "top10": cmd_top10,
         "trivia": cmd_trivia,
         "adivina": cmd_adivina,
         "logros": cmd_logros,
         "id": cmd_id,
-        "saludar": cmd_saludar,          # 👈 OPCIONAL, si quieres /saludar
         "rules": cmd_rules,
         "about": cmd_about
     }
