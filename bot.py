@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# bot.py
 import os
 import logging
 from telegram import Update, BotCommand
@@ -6,15 +6,34 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes
 )
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from datetime import datetime, timedelta
 
-# Módulos personalizados
-from db import initialize_db, add_points, get_user_stats, get_top10, add_achievement, get_configured_chats
-from hashtags import handle_hashtags, VALID_HASHTAGS
-from weekly_challenges import generate_new_challenge, get_current_challenge, check_challenge_completion
-from generador_trivia import generar_pregunta
-from comandos_basicos import cmd_id, cmd_rules, cmd_about
+# Importaciones de tus módulos locales
+from handlers.auth import auth_required, setup_admin_list
+from comandos_basicos import (
+    cmd_start, cmd_help, cmd_id, cmd_echo, cmd_saludar, cmd_rules,
+    cmd_about, cmd_info, cmd_contacto, cmd_links, cmd_donate,
+    cmd_github, cmd_version, cmd_status, cmd_ping,
+    cmd_config, cmd_stats, cmd_broadcast_message
+)
+from db import (
+    initialize_db, add_user, get_user_by_telegram_id, 
+    add_chat, get_chat_by_telegram_id, record_message, 
+    get_top_users, get_top_chats, get_bot_stats, 
+    update_user_activity, update_chat_activity
+)
+from utils import (
+    load_env, get_random_meme_url,
+    get_crypto_price, fetch_weather, get_exchange_rate,
+    get_youtube_video_info, get_joke, get_random_fact
+)
+from juegos import (
+    cmd_adivinapelicula, cmd_emojipelicula, handle_game_message, # Mantén estos si los usas
+    handle_trivia_callback # Si lo usas para la trivia
+)
+
+# IMPORTANTE: Importar generar_pregunta directamente desde generador_trivia.py
+# porque está en la misma carpeta.
+from generador_trivia import generar_pregunta 
 
 # Configuración de logging
 logging.basicConfig(
@@ -23,245 +42,204 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- CONSTANTES ---
-ACHIEVEMENTS = {
-    "critico_experto": {
-        "name": "Crítico Experto",
-        "condition": lambda stats: stats.get("hashtag_counts", {}).get("critica", 0) >= 10,
-        "reward": 100
-    },
-    "maratonista": {
-        "name": "Maratonista",
-        "condition": lambda stats: len(stats.get("active_days", [])) >= 30,
-        "reward": 50
-    }
-}
+# Diccionario para almacenar el estado de la trivia por chat
+# Reemplazamos 'active_trivias' por datos en context.chat_data para una mejor gestión de estado por chat.
+# Se eliminará la variable global active_trivias para usar solo context.chat_data
 
-# --- COMANDOS PRINCIPALES ---
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🎬 ¡Bienvenido al Bot de Cine y Series!\n\n"
-        "Usa /help para ver todos los comandos.\n"
-        "Gana puntos con hashtags como #critica o #recomendacion"
-    )
 
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = """
-🍿 <b>Comandos Disponibles:</b>
+# --- Comandos Administrativos (auth_required) ---
+# ... (Mantén tus comandos administrativos aquí) ...
 
-🎥 <b>Interacción:</b>
-/hashtags - Lista de hashtags válidos
-/reto - Reto semanal actual
-/puntos - Tus puntos y nivel
-/top10 - Ranking de usuarios
+# --- Comandos de Usuario ---
+# ... (Mantén tus comandos de usuario aquí) ...
 
-🎮 <b>Juegos:</b>
-/trivia - Trivia de cine
-/adivina - Adivina la película
-
-🏆 <b>Logros:</b>
-/logros - Tus logros desbloqueados
-"""
-    await update.message.reply_text(help_text, parse_mode="HTML")
-
-async def cmd_hashtags(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    hashtags_text = "🏷️ <b>Hashtags Válidos:</b>\n\n"
-    for tag, points in sorted(VALID_HASHTAGS.items(), key=lambda x: -x[1]):
-        hashtags_text += f"#{tag}: {points} pts\n"
-    await update.message.reply_text(hashtags_text, parse_mode="HTML")
-
-async def cmd_reto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    challenge = get_current_challenge()
-    if not challenge:
-        await update.message.reply_text("⚠️ No hay retos activos ahora.")
+# --- Funciones de Comandos de Juegos ---
+# Modificamos cmd_cinematrivia para usar generar_pregunta
+async def cmd_cinematrivia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Inicia una nueva trivia de películas."""
+    if not update.effective_chat:
         return
-    
-    challenge_types = {
-        "genre": "🎭 Género",
-        "director": "🎬 Director",
-        "decade": "📅 Década"
-    }
-    
-    response = (
-        f"🎬 <b>Reto Semanal</b> (válido hasta {challenge['end_date']})\n\n"
-        f"{challenge_types.get(challenge['challenge_type'])}: "
-        f"<b>{challenge['challenge_value']}</b>\n\n"
-        f"Para completarlo:\n"
-        f"1. Usa #RetoSemanal + #pelicula o #serie\n"
-        f"2. Gana <b>50 puntos extra</b>!"
-    )
-    await update.message.reply_text(response, parse_mode="HTML")
 
-async def cmd_puntos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    stats = get_user_stats(user.id)
-    
-    if not stats:
-        await update.message.reply_text("ℹ️ Aún no tienes puntos. ¡Participa usando hashtags!")
+    chat_id = update.effective_chat.id
+
+    # Comprobar si ya hay una trivia activa en este chat
+    if 'active_trivia_answer' in context.chat_data:
+        await update.effective_chat.send_message(
+            "Ya hay una trivia de películas activa en este chat. ¡Responde la pregunta actual!"
+        )
         return
-    
-    level_names = {
-        1: "🌱 Novato",
-        2: "🎭 Aficionado",
-        3: "🎬 Crítico",
-        4: "🏆 Experto",
-        5: "👑 Maestro"
-    }
-    
-    response = (
-        f"📊 <b>Estadísticas de {user.first_name}</b>\n\n"
-        f"⭐ Nivel: {level_names.get(stats['level'], 'N/A')}\n"
-        f"💎 Puntos: {stats['points']}\n"
-        f"🎯 Para siguiente nivel: {stats['points_to_next']} pts\n"
-        f"📅 Miembro desde: {stats['member_since'][:10]}"
-    )
-    await update.message.reply_text(response, parse_mode="HTML")
 
-async def cmd_top10(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    top_users = get_top10()
-    if not top_users:
-        await update.message.reply_text("ℹ️ Aún no hay suficientes participantes.")
-        return
-    
-    response = "🏆 <b>Top 10 Cinéfilos</b>\n\n"
-    for i, (username, points, level) in enumerate(top_users, 1):
-        response += f"{i}. {username}: {points} pts (Nvl {level})\n"
-    
-    await update.message.reply_text(response, parse_mode="HTML")
+    try:
+        pregunta, respuesta_correcta = generar_pregunta()
+        if respuesta_correcta == "Error": # Manejo de errores de generar_pregunta
+             await update.effective_chat.send_message(pregunta)
+             return
 
-# --- JUEGOS ---
-async def cmd_trivia(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pregunta, respuesta = generar_pregunta()
-    if respuesta == "Error":
-        await update.message.reply_text(pregunta)
-        return
-    
-    context.chat_data['trivia_answer'] = respuesta.lower()
-    await update.message.reply_text(
-        f"🎬 <b>Trivia Cinéfila</b>\n\n{pregunta}\n\n"
-        "Responde directamente a este mensaje.",
-        parse_mode="HTML"
-    )
+        # Almacenar la pregunta y respuesta en context.chat_data para este chat
+        context.chat_data['active_trivia_question'] = pregunta
+        context.chat_data['active_trivia_answer'] = respuesta_correcta.lower().strip()
+        
+        await update.effective_chat.send_message(f"🎬 ¡Nueva Trivia de Cine!\n\n{pregunta}")
+        await update.effective_chat.send_message("Responde directamente a este mensaje para adivinar.")
 
-async def cmd_adivina(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🎥 <b>Adivina la Película</b>\n\n"
-        "Próximamente: ¡Fotogramas y pistas!",
-        parse_mode="HTML"
-    )
+    except Exception as e:
+        logger.error(f"Error al iniciar trivia de películas: {e}")
+        await update.effective_chat.send_message("Lo siento, no pude generar una pregunta de trivia en este momento. Por favor, intenta de nuevo más tarde.")
 
-# --- SISTEMA DE LOGROS ---
-async def cmd_logros(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    stats = get_user_stats(user.id)
-    
-    if not stats or not stats.get("achievements"):
-        await update.message.reply_text("ℹ️ Aún no has desbloqueado logros.")
-        return
-    
-    response = "🏅 <b>Tus Logros</b>\n\n"
-    for ach_id in stats["achievements"]:
-        ach = ACHIEVEMENTS.get(ach_id, {})
-        response += f"• {ach.get('name', 'Desconocido')}\n"
-    
-    await update.message.reply_text(response, parse_mode="HTML")
 
-def check_achievements(user_id: int):
-    stats = get_user_stats(user.id)
-    if not stats:
-        return []
-    
-    new_achievements = []
-    for ach_id, ach in ACHIEVEMENTS.items():
-        if ach_id not in stats.get("achievements", []) and ach["condition"](stats):
-            add_achievement(user_id, ach_id)
-            new_achievements.append(ach["name"])
-    
-    return new_achievements
+# --- Manejadores de Mensajes Generales ---
+async def handle_all_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Maneja todos los mensajes de texto para registrar actividad y otras lógicas."""
+    if update.effective_user and update.effective_chat and update.message and update.message.text:
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        username = update.effective_user.username or update.effective_user.first_name
+        chat_type = update.effective_chat.type
+        
+        await add_user(user_id, username)
+        await add_chat(chat_id, update.effective_chat.title or "Private Chat", chat_type)
+        await record_message(user_id, chat_id, update.message.text)
+        await update_user_activity(user_id)
+        await update_chat_activity(chat_id)
 
-# --- TAREAS PROGRAMADAS ---
-async def weekly_challenge_task(context: ContextTypes.DEFAULT_TYPE):
-    new_challenge = generate_new_challenge()
-    if not new_challenge:
-        return
-    
-    for chat in get_configured_chats():
-        try:
-            await context.bot.send_message(
-                chat_id=chat["chat_id"],
-                text=f"🎬 <b>Nuevo Reto Semanal!</b>\n\n"
-                     f"🏆 {new_challenge['challenge_value']}\n\n"
-                     f"Usa #RetoSemanal para participar!",
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            logger.error(f"Error enviando reto a chat {chat['chat_id']}: {e}")
+        # Lógica para manejar respuestas de trivia (AHORA VA AQUÍ)
+        # Se verifica si hay una trivia activa en este chat
+        if 'active_trivia_answer' in context.chat_data:
+            user_response = update.message.text.lower().strip()
+            expected_answer = context.chat_data['active_trivia_answer']
 
-# --- CONFIGURACIÓN DEL BOT ---
+            if user_response == expected_answer:
+                await update.effective_chat.send_message(
+                    f"🎉 ¡Correcto, {update.effective_user.first_name}! La respuesta era '{expected_answer.title()}'."
+                )
+                # Opcional: añadir puntos al usuario
+                # await add_points(user_id, 10) 
+                
+                # Eliminar la trivia activa del chat_data
+                del context.chat_data['active_trivia_question']
+                del context.chat_data['active_trivia_answer']
+                return # Importante: el mensaje ha sido manejado por la trivia
+            # Si la respuesta es incorrecta, el bot no dice nada para no "spammear".
+            # Puedes añadir un mensaje de "incorrecto, intenta de nuevo" si lo deseas.
+            # else:
+            #     await update.effective_chat.send_message(
+            #         f"❌ Incorrecto, {update.effective_user.first_name}. ¡Sigue intentando!"
+            #     )
+            # return # Si quieres que el mensaje de respuesta de trivia no sea procesado por otros manejadores
+
+
+    # Si el mensaje no fue una respuesta de trivia, o no era texto, o era un comando,
+    # entonces puede ser procesado por otros manejadores.
+    # Por ejemplo, si tienes un handle_game_message general en juegos.py,
+    # este se llamaría después de que la lógica de trivia haya fallado en reconocer el mensaje.
+    # Si quieres que handle_game_message maneje también otras respuestas de juegos (adivina, emoji),
+    # asegúrate de que su lógica no interfiera con la de la trivia o viceversa.
+    await handle_game_message(update, context) # Llama a tu manejador general de mensajes de juegos
+
+
+# --- Inicialización y Ejecución del Bot ---
 async def post_init(application):
-    # Configurar comandos del menú
+    """Configurar comandos y tareas después de inicializar la aplicación"""
     commands = [
+        # Comandos básicos
         BotCommand("start", "Inicia el bot"),
-        BotCommand("help", "Ayuda y comandos"),
-        BotCommand("hashtags", "Hashtags válidos"),
-        BotCommand("reto", "Reto semanal"),
-        BotCommand("puntos", "Tus puntos"),
-        BotCommand("top10", "Mejores usuarios"),
-        BotCommand("trivia", "Trivia de cine"),
-        BotCommand("adivina", "Adivina la película"),
-        BotCommand("logros", "Tus logros"),
-        BotCommand("id", "Muestra tu ID"),
-        BotCommand("rules", "Reglas del grupo"),
-        BotCommand("about", "Acerca del bot")
+        BotCommand("help", "Muestra la ayuda"),
+        BotCommand("id", "Muestra tu ID de usuario y chat"),
+        BotCommand("echo", "Repite tu mensaje"),
+        BotCommand("saludar", "El bot te saluda"),
+        BotCommand("rules", "Muestra las reglas del grupo"),
+        BotCommand("about", "Información sobre el bot"),
+        BotCommand("info", "Muestra información útil"),
+        BotCommand("contacto", "Información de contacto"),
+        BotCommand("links", "Enlaces útiles"),
+        BotCommand("donate", "Información para donaciones"),
+        BotCommand("github", "Enlace al repositorio de GitHub"),
+        BotCommand("version", "Muestra la versión del bot"),
+        BotCommand("status", "Estado actual del bot"),
+        BotCommand("ping", "Comprueba la latencia del bot"),
+        BotCommand("config", "Configura el bot (solo admins)"),
+        BotCommand("stats", "Estadísticas del bot"),
+        BotCommand("broadcast_message", "Envía un mensaje a todos los chats (solo admins)"),
+        # Comandos de utilidad
+        BotCommand("meme", "Obtén un meme aleatorio"),
+        BotCommand("crypto", "Obtén el precio de una criptomoneda (ej. /crypto BTC)"),
+        BotCommand("weather", "Obtén el clima de una ciudad (ej. /weather Madrid)"),
+        BotCommand("exchange", "Obtén tasa de cambio (ej. /exchange USD EUR)"),
+        BotCommand("youtube", "Obtén info de video de YouTube (ej. /youtube <URL>)"),
+        BotCommand("joke", "Obtén un chiste aleatorio"),
+        BotCommand("fact", "Obtén un dato curioso aleatorio"),
+        # Comandos de juegos
+        BotCommand("cinematrivia", "Inicia una trivia de películas"), # AÑADIDO
+        BotCommand("adivinapelicula", "Inicia el juego Adivina la Película"),
+        BotCommand("emojipelicula", "Inicia el juego Emoji Película"),
     ]
     await application.bot.set_my_commands(commands)
+    logger.info("Comandos del bot establecidos.")
     
-    # Inicializar base de datos
-    initialize_db()
-    
-    # Programar tarea semanal
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(
-        weekly_challenge_task,
-        'cron',
-        day_of_week='mon',
-        hour=9,
-        args=[application]
-    )
-    scheduler.start()
+    # Inicializar la base de datos
+    await initialize_db()
+    logger.info("Base de datos inicializada.")
+
+    # Cargar lista de administradores
+    await setup_admin_list()
+    logger.info("Lista de administradores cargada.")
 
 async def main():
-    application = ApplicationBuilder() \
-        .token(os.getenv('TELEGRAM_TOKEN')) \
-        .post_init(post_init) \
-        .build()
+    load_env() # Cargar variables de entorno
 
-    # Manejadores de comandos
-    command_handlers = {
-        "start": cmd_start,
-        "help": cmd_help,
-        "hashtags": cmd_hashtags,
-        "reto": cmd_reto,
-        "puntos": cmd_puntos,
-        "top10": cmd_top10,
-        "trivia": cmd_trivia,
-        "adivina": cmd_adivina,
-        "logros": cmd_logros,
-        "id": cmd_id,
-        "rules": cmd_rules,
-        "about": cmd_about
-    }
+    TOKEN = os.environ.get('TOKEN')
+    if not TOKEN:
+        logger.error("No se encontró el TOKEN del bot en las variables de entorno.")
+        return
+
+    application = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
+
+    # --- Registra tus handlers aquí ---
+
+    # Comandos básicos (algunos con autenticación)
+    application.add_handler(CommandHandler("start", cmd_start))
+    application.add_handler(CommandHandler("help", cmd_help))
+    application.add_handler(CommandHandler("id", auth_required(cmd_id)))
+    application.add_handler(CommandHandler("echo", auth_required(cmd_echo)))
+    application.add_handler(CommandHandler("saludar", cmd_saludar))
+    application.add_handler(CommandHandler("rules", cmd_rules))
+    application.add_handler(CommandHandler("about", cmd_about))
+    application.add_handler(CommandHandler("info", cmd_info))
+    application.add_handler(CommandHandler("contacto", cmd_contacto))
+    application.add_handler(CommandHandler("links", cmd_links))
+    application.add_handler(CommandHandler("donate", cmd_donate))
+    application.add_handler(CommandHandler("github", cmd_github))
+    application.add_handler(CommandHandler("version", cmd_version))
+    application.add_handler(CommandHandler("status", auth_required(cmd_status)))
+    application.add_handler(CommandHandler("ping", auth_required(cmd_ping)))
+    application.add_handler(CommandHandler("config", auth_required(cmd_config)))
+    application.add_handler(CommandHandler("stats", auth_required(cmd_stats)))
+    application.add_handler(CommandHandler("broadcast_message", auth_required(cmd_broadcast_message)))
     
-    for command, handler in command_handlers.items():
-        application.add_handler(CommandHandler(command, handler))
+    # Comandos de utilidad
+    application.add_handler(CommandHandler("meme", auth_required(get_random_meme_url)))
+    application.add_handler(CommandHandler("crypto", auth_required(get_crypto_price)))
+    application.add_handler(CommandHandler("weather", auth_required(fetch_weather)))
+    application.add_handler(CommandHandler("exchange", auth_required(get_exchange_rate)))
+    application.add_handler(CommandHandler("youtube", auth_required(get_youtube_video_info)))
+    application.add_handler(CommandHandler("joke", auth_required(get_joke)))
+    application.add_handler(CommandHandler("fact", auth_required(get_random_fact)))
 
-    # Manejador de hashtags y mensajes
-    application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND, 
-        handle_hashtags
-    ))
+    # Comandos de juegos
+    application.add_handler(CommandHandler("cinematrivia", auth_required(cmd_cinematrivia))) # Usa la nueva función
+    application.add_handler(CommandHandler("adivinapelicula", auth_required(cmd_adivinapelicula)))
+    application.add_handler(CommandHandler("emojipelicula", auth_required(cmd_emojipelicula)))
 
-    # Iniciar bot
+    # Manejadores de callbacks
+    application.add_handler(CallbackQueryHandler(handle_trivia_callback)) # Si usas botones para trivia
+
+    # Manejador de mensajes de texto (NO COMANDOS)
+    # Este manejador debe ir al final o su lógica debe ser muy cuidadosa
+    # para no interferir con otros handlers (ej. trivia).
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all_messages))
+
+
+    logger.info("Bot iniciado. Presiona Ctrl+C para detener.")
     await application.run_polling()
 
 if __name__ == '__main__':
