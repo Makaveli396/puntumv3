@@ -1,0 +1,14 @@
+# Opción 1: Archivo runtime.txt (crear en la raíz del proyecto)
+python-3.12.7
+
+# Opción 2: Si usas render.yaml, agregar/modificar:
+services:
+  - type: web
+    name: your-bot-name
+    env: python
+    runtime: python-3.12.7
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python bot.py"
+
+# Opción 3: Variables de entorno en Render Dashboard
+# PYTHON_VERSION = 3.12.7
