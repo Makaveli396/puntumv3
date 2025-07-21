@@ -14,7 +14,11 @@ from db import initialize_db, add_points, get_user_stats, get_top10
 from hashtags import handle_hashtags, VALID_HASHTAGS
 from weekly_challenges import generate_new_challenge, get_current_challenge, check_challenge_completion
 from generador_trivia import generar_pregunta
-from comandos_basicos import cmd_id, cmd_rules, cmd_about
+from comandos_basicos import (
+    cmd_start, cmd_help, cmd_hashtags, cmd_reto, cmd_generarreto,
+    cmd_puntos, cmd_top10, cmd_trivia, cmd_adivina, cmd_logros,
+    cmd_id, cmd_saludar, cmd_rules, cmd_about
+)
 
 # Configuración de logging
 logging.basicConfig(
@@ -239,12 +243,14 @@ async def main():
         "help": cmd_help,
         "hashtags": cmd_hashtags,
         "reto": cmd_reto,
+        "generarreto": cmd_generarreto,  # 👈 NUEVO
         "puntos": cmd_puntos,
         "top10": cmd_top10,
         "trivia": cmd_trivia,
         "adivina": cmd_adivina,
         "logros": cmd_logros,
         "id": cmd_id,
+        "saludar": cmd_saludar,          # 👈 OPCIONAL, si quieres /saludar
         "rules": cmd_rules,
         "about": cmd_about
     }
