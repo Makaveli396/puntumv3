@@ -29,9 +29,18 @@ from juegos import (
     handle_game_message
 )
 from sistema_autorizacion import (
-    create_auth_tables, is_chat_authorized, authorize_chat,
-    auth_required, cmd_solicitar_autorizacion, cmd_aprobar_grupo, cmd_ver_solicitudes,
-    cmd_addadmin, cmd_removeadmin, cmd_listadmins, cmd_revocar
+    create_auth_tables, 
+    is_chat_authorized, 
+    authorize_chat,
+    auth_required, 
+    cmd_solicitar_autorizacion, 
+    cmd_aprobar_grupo, 
+    cmd_ver_solicitudes,
+    cmd_addadmin,
+    cmd_removeadmin,
+    cmd_listadmins,
+    cmd_revocar,
+    setup_admin_list
 )
 from comandos_basicos import (
     cmd_start, cmd_help, cmd_ranking, cmd_miperfil, cmd_reto
