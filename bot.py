@@ -12,7 +12,12 @@ from datetime import datetime, timedelta
 # Módulos personalizados
 from db import initialize_db, add_points, get_user_stats, get_top10
 from hashtags import handle_hashtags, VALID_HASHTAGS
-from weekly_challenges import generate_new_challenge, get_current_challenge, check_challenge_completion
+from weekly_challenges import (
+    generate_new_challenge, 
+    get_current_challenge, 
+    check_challenge_completion,
+    CHALLENGE_TYPES  # Asegúrate de exportarlo en weekly_challenges.py
+)
 from generador_trivia import generar_pregunta
 from comandos_basicos import (
     cmd_start, cmd_help, cmd_hashtags, cmd_reto, cmd_generarreto,
