@@ -1,6 +1,7 @@
 python-telegram-bot==20.3
 apscheduler==3.10.1
-tmdbv3api==1.9.0  # Última versión estable disponible
+tmdbv3api==1.9.0
 python-dotenv==1.0.0
 requests==2.31.0
-setuptools<81.0.0  # Evita el warning de deprecated
+psycopg2-binary==2.9.7
+setuptools<81.0.0

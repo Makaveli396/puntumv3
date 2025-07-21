@@ -3,7 +3,7 @@ import os
 import random
 from datetime import datetime, timedelta
 import logging
-from db import db_session
+from db import db_session, DATABASE_URL
 from tmdbv3api import TMDb, Movie
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ def generate_new_challenge():
     """Genera un nuevo reto semanal evitando repeticiones recientes"""
     with db_session() as conn:
         cursor = conn.cursor()
+        is_postgresql = DATABASE_URL is not None
         
         # 1. Obtener retos anteriores
         cursor.execute("SELECT challenge_type, challenge_value FROM weekly_challenges")
@@ -43,7 +44,7 @@ def generate_new_challenge():
             available_values = CHALLENGE_TYPES[challenge_type]["values"]
             
             # Filtrar valores usados recientemente
-            used_values = [c[1] for c in past_challenges if c[0] == challenge_type][-4:]
+            used_values = [c[1] if is_postgresql else c[1] for c in past_challenges if (c[0] if is_postgresql else c[0]) == challenge_type][-4:]
             unused_values = [v for v in available_values if v not in used_values]
             
             if unused_values:
@@ -52,22 +53,35 @@ def generate_new_challenge():
                 end_date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
                 
                 # 3. Insertar nuevo reto
-                cursor.execute(
-                    """INSERT INTO weekly_challenges 
-                    (challenge_type, challenge_value, start_date, end_date)
-                    VALUES (?, ?, ?, ?)""",
-                    (challenge_type, challenge_value, start_date, end_date)
-                )
+                if is_postgresql:
+                    cursor.execute("""
+                        INSERT INTO weekly_challenges 
+                        (challenge_type, challenge_value, start_date, end_date)
+                        VALUES (%s, %s, %s, %s) RETURNING id
+                    """, (challenge_type, challenge_value, start_date, end_date))
+                    challenge_id = cursor.fetchone()[0]
+                    
+                    # Desactivar retos anteriores
+                    cursor.execute(
+                        "UPDATE weekly_challenges SET is_active = FALSE WHERE id != %s",
+                        (challenge_id,)
+                    )
+                else:
+                    cursor.execute("""
+                        INSERT INTO weekly_challenges 
+                        (challenge_type, challenge_value, start_date, end_date)
+                        VALUES (?, ?, ?, ?)
+                    """, (challenge_type, challenge_value, start_date, end_date))
+                    challenge_id = cursor.lastrowid
+                    
+                    # Desactivar retos anteriores
+                    cursor.execute(
+                        "UPDATE weekly_challenges SET is_active = 0 WHERE id != ?",
+                        (challenge_id,)
+                    )
                 
-                # Desactivar retos anteriores
-                cursor.execute(
-                    "UPDATE weekly_challenges SET is_active = 0 WHERE id != ?",
-                    (cursor.lastrowid,)
-                )
-                
-                conn.commit()
                 return {
-                    "id": cursor.lastrowid,
+                    "id": challenge_id,
                     "challenge_type": challenge_type,
                     "challenge_value": challenge_value,
                     "start_date": start_date,
@@ -79,10 +93,32 @@ def get_current_challenge():
     """Obtiene el reto activo actual"""
     with db_session() as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM weekly_challenges WHERE is_active = 1 LIMIT 1"
-        )
-        return cursor.fetchone()
+        is_postgresql = DATABASE_URL is not None
+        
+        if is_postgresql:
+            cursor.execute(
+                "SELECT * FROM weekly_challenges WHERE is_active = TRUE LIMIT 1"
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM weekly_challenges WHERE is_active = 1 LIMIT 1"
+            )
+        
+        result = cursor.fetchone()
+        if result:
+            # Convertir a dict para compatibilidad
+            if is_postgresql:
+                return {
+                    "id": result[0],
+                    "challenge_type": result[1],
+                    "challenge_value": result[2],
+                    "start_date": str(result[3]),
+                    "end_date": str(result[4]),
+                    "is_active": result[5]
+                }
+            else:
+                return dict(result)
+        return None
 
 async def check_challenge_completion(user_id: int, movie_id: int):
     """Verifica si una película cumple con el reto actual"""
@@ -90,20 +126,24 @@ async def check_challenge_completion(user_id: int, movie_id: int):
     if not challenge:
         return False
     
-    movie = Movie().details(movie_id)
-    
-    if challenge["challenge_type"] == "genre":
-        genres = [g["name"] for g in movie.genres]
-        return challenge["challenge_value"] in genres
+    try:
+        movie = Movie().details(movie_id)
         
-    elif challenge["challenge_type"] == "director":
-        credits = Movie().credits(movie_id)
-        directors = [c["name"] for c in credits["crew"] if c["job"] == "Director"]
-        return challenge["challenge_value"] in directors
+        if challenge["challenge_type"] == "genre":
+            genres = [g["name"] for g in movie.genres]
+            return challenge["challenge_value"] in genres
+            
+        elif challenge["challenge_type"] == "director":
+            credits = Movie().credits(movie_id)
+            directors = [c["name"] for c in credits["crew"] if c["job"] == "Director"]
+            return challenge["challenge_value"] in directors
+            
+        elif challenge["challenge_type"] == "decade":
+            release_year = movie.release_date[:4]
+            target_decade = challenge["challenge_value"][:4]  # Ej: "1990s" -> "199"
+            return release_year[:3] == target_decade[:3]
         
-    elif challenge["challenge_type"] == "decade":
-        release_year = movie.release_date[:4]
-        target_decade = challenge["challenge_value"][:4]  # Ej: "1990s" -> "199"
-        return release_year[:3] == target_decade[:3]
-    
-    return False
+        return False
+    except Exception as e:
+        logger.error(f"Error verificando reto: {e}")
+        return False
