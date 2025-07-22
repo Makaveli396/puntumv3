@@ -1,7 +1,18 @@
 # ====================================
 # HANDLERS DE CALLBACKS (continuación)
 # ====================================
+# Agregar estas importaciones al INICIO de sistema_autorizacion.py
 
+import sqlite3
+import logging
+from typing import List, Callable, Any
+from functools import wraps
+
+# ESTAS SON LAS IMPORTACIONES QUE FALTAN:
+from telegram import Update
+from telegram.ext import ContextTypes
+
+# El resto de tu código sistema_autorizacion.py va aquí...
 async def handle_authorization_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Manejar callbacks de botones de autorización"""
     query = update.callback_query
