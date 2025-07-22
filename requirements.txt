@@ -2,9 +2,6 @@
 python-telegram-bot==20.7
 python-dotenv==1.0.0
 
-# Base de datos y utilidades
-sqlite3
-
 # Desarrollo y testing
 pytest==7.4.3
 pytest-asyncio==0.21.1
