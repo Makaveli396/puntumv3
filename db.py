@@ -187,3 +187,193 @@ def verify_database_integrity() -> bool:
     finally:
         if conn:
             conn.close()
+# Agregar estas funciones a tu archivo db.py
+
+def create_tables():
+    """Crear las tablas necesarias para el bot"""
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Tabla de usuarios
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL,
+                points INTEGER DEFAULT 0,
+                count INTEGER DEFAULT 0,
+                level INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Tabla de puntos (historial)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS points (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                points INTEGER NOT NULL,
+                hashtag TEXT,
+                chat_id INTEGER,
+                message_id INTEGER,
+                is_challenge_bonus BOOLEAN DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        # Tabla de juegos (si la necesitas)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS games (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                game_type TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                data TEXT,  -- JSON data para el estado del juego
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        logger.info("✅ Tablas creadas correctamente")
+        
+    except sqlite3.Error as e:
+        logger.error(f"Error creando tablas: {e}")
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            conn.close()
+
+def add_points(user_id: int, username: str, points: int, hashtag: Optional[str] = None, 
+               message_text: Optional[str] = None, chat_id: Optional[int] = None, 
+               message_id: Optional[int] = None, is_challenge_bonus: bool = False, 
+               context: Optional[Any] = None) -> Dict[str, Any]:
+    """Wrapper para add_points_safe para mantener compatibilidad"""
+    return add_points_safe(
+        user_id=user_id,
+        username=username,
+        points=points,
+        hashtag=hashtag,
+        message_text=message_text,
+        chat_id=chat_id,
+        message_id=message_id,
+        is_challenge_bonus=is_challenge_bonus,
+        context=context
+    )
+
+def get_user_stats(user_id: int) -> Optional[Dict[str, Any]]:
+    """Obtener estadísticas de un usuario
+    
+    Args:
+        user_id: ID del usuario
+        
+    Returns:
+        Dict con estadísticas del usuario o None si no existe
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Obtener datos del usuario
+        cursor.execute(
+            """SELECT id, username, points, count, level, created_at 
+               FROM users WHERE id = ?""",
+            (user_id,)
+        )
+        user_data = cursor.fetchone()
+        
+        if not user_data:
+            return None
+        
+        # Obtener estadísticas adicionales
+        cursor.execute(
+            """SELECT COUNT(*) as total_activities,
+                      MAX(points) as max_points_single,
+                      COUNT(DISTINCT hashtag) as unique_hashtags
+               FROM points WHERE user_id = ? AND hashtag IS NOT NULL""",
+            (user_id,)
+        )
+        stats = cursor.fetchone()
+        
+        return {
+            "id": user_data[0],
+            "username": user_data[1],
+            "total_points": user_data[2],
+            "activity_count": user_data[3],
+            "level": user_data[4],
+            "created_at": user_data[5],
+            "total_activities": stats[0] if stats else 0,
+            "max_points_single": stats[1] if stats else 0,
+            "unique_hashtags": stats[2] if stats else 0
+        }
+        
+    except sqlite3.Error as e:
+        logger.error(f"Error obteniendo estadísticas del usuario {user_id}: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def get_top10() -> list:
+    """Obtener top 10 usuarios por puntos
+    
+    Returns:
+        Lista de usuarios ordenados por puntos (descendente)
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            """SELECT username, points, level, count
+               FROM users 
+               ORDER BY points DESC, level DESC 
+               LIMIT 10"""
+        )
+        
+        results = cursor.fetchall()
+        
+        return [
+            {
+                "username": row[0],
+                "points": row[1],
+                "level": row[2],
+                "count": row[3],
+                "rank": i + 1
+            }
+            for i, row in enumerate(results)
+        ]
+        
+    except sqlite3.Error as e:
+        logger.error(f"Error obteniendo top 10: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def get_user_total_points(user_id: int) -> int:
+    """Obtener puntos totales de un usuario (versión pública)
+    
+    Args:
+        user_id: ID del usuario
+        
+    Returns:
+        Puntos totales del usuario
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        return get_user_total_points_internal(cursor, user_id)
+    except sqlite3.Error as e:
+        logger.error(f"Error obteniendo puntos del usuario {user_id}: {e}")
+        return 0
+    finally:
+        if conn:
+            conn.close()
