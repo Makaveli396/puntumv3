@@ -1,379 +1,334 @@
 import sqlite3
 from datetime import datetime
-import logging
-from typing import Optional, Dict, Any
 
-logger = logging.getLogger(__name__)
 DB_PATH = "puntum.db"
 
-def get_connection() -> sqlite3.Connection:
-    """Obtener conexión a la base de datos con manejo de errores
-    
-    Returns:
-        sqlite3.Connection: Conexión a la base de datos
-        
-    Raises:
-        sqlite3.Error: Si hay un error al conectar
-    """
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("PRAGMA foreign_keys = ON")  # Habilitar claves foráneas
-        return conn
-    except sqlite3.Error as e:
-        logger.error(f"Error conectando a la base de datos: {e}")
-        raise
+def get_connection():
+    return sqlite3.connect(DB_PATH)
 
-def calculate_level(points: int) -> int:
-    """Calcula el nivel basado en los puntos acumulados
-    
-    Args:
-        points: Puntos totales acumulados
-        
-    Returns:
-        Nivel calculado
-    """
-    # Implementación básica - ajusta según tus necesidades
-    return points // 100 if points > 0 else 0
+def create_tables():
+    conn = get_connection()
+    cursor = conn.cursor()
 
-def add_points_safe(user_id: int, username: str, points: int, hashtag: Optional[str] = None, 
-                   message_text: Optional[str] = None, chat_id: Optional[int] = None, 
-                   message_id: Optional[int] = None, is_challenge_bonus: bool = False, 
-                   context: Optional[Any] = None) -> Dict[str, Any]:
-    """Versión segura de add_points con mejor manejo de errores
-    
-    Args:
-        user_id: ID del usuario
-        username: Nombre del usuario
-        points: Puntos a añadir
-        hashtag: Hashtag asociado (opcional)
-        message_text: Texto del mensaje (opcional)
-        chat_id: ID del chat (opcional)
-        message_id: ID del mensaje (opcional)
-        is_challenge_bonus: Si es un bono de desafío
-        context: Contexto del bot (opcional)
-        
-    Returns:
-        Dict con resultado de la operación:
-        {
-            "ok": bool, 
-            "new_total": int, 
-            "level": int,
-            "error": str (solo si ok=False)
-        }
-    """
-    conn = None
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
+    cursor.execute(
+        """CREATE TABLE IF NOT EXISTS points (
+            user_id INTEGER,
+            username TEXT,
+            points INTEGER,
+            hashtag TEXT,
+            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            chat_id INTEGER,
+            message_id INTEGER,
+            is_challenge_bonus INTEGER DEFAULT 0
+        )"""
+    )
 
-        # Iniciar transacción
-        cursor.execute("BEGIN TRANSACTION")
-        
-        # Insertar puntos
-        cursor.execute(
-            """INSERT INTO points (user_id, username, points, hashtag, chat_id, message_id, is_challenge_bonus)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (user_id, username, points, hashtag, chat_id, message_id, int(is_challenge_bonus))
-        )
+    cursor.execute(
+        """CREATE TABLE IF NOT EXISTS user_achievements (
+            user_id INTEGER,
+            achievement_id INTEGER,
+            date TEXT DEFAULT CURRENT_DATE,
+            PRIMARY KEY (user_id, achievement_id)
+        )"""
+    )
 
-        # Obtener puntos actuales del usuario
-        current_points = get_user_total_points_internal(cursor, user_id)
-        new_total = current_points + points
-        new_level = calculate_level(new_total)
+    # Create users table if it doesn't exist (for better user management)
+    cursor.execute(
+        """CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY,
+            username TEXT,
+            points INTEGER DEFAULT 0,
+            count INTEGER DEFAULT 0,
+            level INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
 
-        # Actualizar tabla de usuarios
-        cursor.execute(
-            """INSERT OR REPLACE INTO users (id, username, points, count, level, created_at)
-               VALUES (?, ?, ?, 
-                       COALESCE((SELECT count FROM users WHERE id = ?), 0) + 1,
-                       ?, 
-                       COALESCE((SELECT created_at FROM users WHERE id = ?), CURRENT_TIMESTAMP))""",
-            (user_id, username, new_total, user_id, new_level, user_id)
-        )
+    # Create chat_config table for chat management
+    cursor.execute(
+        """CREATE TABLE IF NOT EXISTS chat_config (
+            chat_id INTEGER PRIMARY KEY,
+            chat_name TEXT,
+            rankings_enabled BOOLEAN DEFAULT 1,
+            challenges_enabled BOOLEAN DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
 
-        # Confirmar transacción
-        conn.commit()
-        
-        logger.info(f"Puntos agregados: {username} (+{points}) = {new_total} puntos")
-        
-        # Verificar logros después de la transacción exitosa
-        if context and chat_id:
-            try:
-                from handlers.achievements import check_achievements
-                check_achievements(user_id, username, context, chat_id)
-            except ImportError:
-                logger.warning("Módulo de logros no encontrado")
-            except Exception as e:
-                logger.error(f"Error verificando logros: {e}")
-        
-        return {"ok": True, "new_total": new_total, "level": new_level}
+    conn.commit()
+    conn.close()
 
-    except sqlite3.Error as e:
-        logger.error(f"Error en base de datos al agregar puntos: {e}")
-        if conn:
-            conn.rollback()
-        return {"ok": False, "error": str(e)}
-    except Exception as e:
-        logger.error(f"Error inesperado al agregar puntos: {e}")
-        if conn:
-            conn.rollback()
-        return {"ok": False, "error": "Error interno"}
-    finally:
-        if conn:
-            conn.close()
+def add_points(user_id, username, points, hashtag=None, message_text=None, chat_id=None, message_id=None, is_challenge_bonus=False, context=None):
+    conn = get_connection()
+    cursor = conn.cursor()
 
-def get_user_total_points_internal(cursor: sqlite3.Cursor, user_id: int) -> int:
-    """Obtener puntos totales usando cursor existente
-    
-    Args:
-        cursor: Cursor activo de la base de datos
-        user_id: ID del usuario
-        
-    Returns:
-        Puntos totales acumulados por el usuario
-    """
+    cursor.execute(
+        """INSERT INTO points (user_id, username, points, hashtag, chat_id, message_id, is_challenge_bonus)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (user_id, username, points, hashtag, chat_id, message_id, int(is_challenge_bonus))
+    )
+
+    # Update or create user record
+    cursor.execute(
+        """INSERT OR REPLACE INTO users (id, username, points, count, level, created_at)
+           VALUES (?, ?, 
+                   COALESCE((SELECT points FROM users WHERE id = ?), 0) + ?,
+                   COALESCE((SELECT count FROM users WHERE id = ?), 0) + 1,
+                   ?, 
+                   COALESCE((SELECT created_at FROM users WHERE id = ?), CURRENT_TIMESTAMP))""",
+        (user_id, username, user_id, points, user_id, calculate_level(get_user_total_points(user_id) + points), user_id)
+    )
+
+    conn.commit()
+    conn.close()
+
+    if context and chat_id:
+        try:
+            from handlers.achievements import check_achievements
+            check_achievements(user_id, username, context, chat_id)
+        except ImportError:
+            pass  # Achievements module is optional
+
+    return {"ok": True}
+
+def add_achievement(user_id: int, achievement_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT OR IGNORE INTO user_achievements (user_id, achievement_id)
+           VALUES (?, ?)""",
+        (user_id, achievement_id)
+    )
+    conn.commit()
+    conn.close()
+
+def get_user_total_points(user_id: int) -> int:
+    """Get total points for a user"""
+    conn = get_connection()
+    cursor = conn.cursor()
     cursor.execute(
         """SELECT COALESCE(SUM(points), 0) FROM points WHERE user_id = ?""",
         (user_id,)
     )
     result = cursor.fetchone()
+    conn.close()
     return result[0] if result else 0
 
-def backup_database() -> Optional[str]:
-    """Crear respaldo de la base de datos
+def calculate_level(points: int) -> int:
+    """Calculate user level based on points"""
+    if points >= 1000:
+        return 5
+    elif points >= 500:
+        return 4
+    elif points >= 250:
+        return 3
+    elif points >= 100:
+        return 2
+    else:
+        return 1
+
+def get_level_info(level: int) -> dict:
+    """Get level information including name and requirements"""
+    level_data = {
+        1: {"name": "Novato Cinéfilo", "min_points": 0, "next_points": 100},
+        2: {"name": "Aficionado", "min_points": 100, "next_points": 250},
+        3: {"name": "Crítico Amateur", "min_points": 250, "next_points": 500},
+        4: {"name": "Experto Cinematográfico", "min_points": 500, "next_points": 1000},
+        5: {"name": "Maestro del Séptimo Arte", "min_points": 1000, "next_points": None}
+    }
     
-    Returns:
-        str: Ruta del archivo de respaldo o None si falla
-    """
-    try:
-        import shutil
-        from datetime import datetime
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = f"puntum_backup_{timestamp}.db"
-        
-        shutil.copy2(DB_PATH, backup_path)
-        logger.info(f"Respaldo creado: {backup_path}")
-        return backup_path
-    except Exception as e:
-        logger.error(f"Error creando respaldo: {e}")
-        return None
+    return level_data.get(level, level_data[1])
 
-def verify_database_integrity() -> bool:
-    """Verificar integridad de la base de datos
-    
-    Returns:
-        bool: True si la base de datos está íntegra, False si no
-    """
-    conn = None
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Verificar integridad
-        cursor.execute("PRAGMA integrity_check")
-        result = cursor.fetchone()
-        
-        if result and result[0] == "ok":
-            logger.info("Base de datos íntegra")
-            return True
-        else:
-            logger.error(f"Problema de integridad: {result[0] if result else 'No result'}")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Error verificando integridad: {e}")
-        return False
-    finally:
-        if conn:
-            conn.close()
-# Agregar estas funciones a tu archivo db.py
+def get_user_stats(user_id: int):
+    """Get comprehensive user statistics"""
+    conn = get_connection()
+    cursor = conn.cursor()
 
-def create_tables():
-    """Crear las tablas necesarias para el bot"""
-    conn = None
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Tabla de usuarios
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY,
-                username TEXT NOT NULL,
-                points INTEGER DEFAULT 0,
-                count INTEGER DEFAULT 0,
-                level INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Tabla de puntos (historial)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS points (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                username TEXT NOT NULL,
-                points INTEGER NOT NULL,
-                hashtag TEXT,
-                chat_id INTEGER,
-                message_id INTEGER,
-                is_challenge_bonus BOOLEAN DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (id)
-            )
-        ''')
-        
-        # Tabla de juegos (si la necesitas)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS games (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id INTEGER NOT NULL,
-                game_type TEXT NOT NULL,
-                status TEXT DEFAULT 'active',
-                data TEXT,  -- JSON data para el estado del juego
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        conn.commit()
-        logger.info("✅ Tablas creadas correctamente")
-        
-    except sqlite3.Error as e:
-        logger.error(f"Error creando tablas: {e}")
-        if conn:
-            conn.rollback()
-        raise
-    finally:
-        if conn:
-            conn.close()
-
-def add_points(user_id: int, username: str, points: int, hashtag: Optional[str] = None, 
-               message_text: Optional[str] = None, chat_id: Optional[int] = None, 
-               message_id: Optional[int] = None, is_challenge_bonus: bool = False, 
-               context: Optional[Any] = None) -> Dict[str, Any]:
-    """Wrapper para add_points_safe para mantener compatibilidad"""
-    return add_points_safe(
-        user_id=user_id,
-        username=username,
-        points=points,
-        hashtag=hashtag,
-        message_text=message_text,
-        chat_id=chat_id,
-        message_id=message_id,
-        is_challenge_bonus=is_challenge_bonus,
-        context=context
+    # Get basic user info and totals
+    cursor.execute(
+        """SELECT COALESCE(SUM(points), 0) as total_points, 
+                  COUNT(*) as total_contributions,
+                  username,
+                  MIN(timestamp) as member_since
+           FROM points 
+           WHERE user_id = ?""",
+        (user_id,)
     )
-
-def get_user_stats(user_id: int) -> Optional[Dict[str, Any]]:
-    """Obtener estadísticas de un usuario
+    basic_stats = cursor.fetchone()
     
-    Args:
-        user_id: ID del usuario
-        
-    Returns:
-        Dict con estadísticas del usuario o None si no existe
-    """
-    conn = None
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Obtener datos del usuario
-        cursor.execute(
-            """SELECT id, username, points, count, level, created_at 
-               FROM users WHERE id = ?""",
-            (user_id,)
-        )
-        user_data = cursor.fetchone()
-        
-        if not user_data:
-            return None
-        
-        # Obtener estadísticas adicionales
-        cursor.execute(
-            """SELECT COUNT(*) as total_activities,
-                      MAX(points) as max_points_single,
-                      COUNT(DISTINCT hashtag) as unique_hashtags
-               FROM points WHERE user_id = ? AND hashtag IS NOT NULL""",
-            (user_id,)
-        )
-        stats = cursor.fetchone()
-        
-        return {
-            "id": user_data[0],
-            "username": user_data[1],
-            "total_points": user_data[2],
-            "activity_count": user_data[3],
-            "level": user_data[4],
-            "created_at": user_data[5],
-            "total_activities": stats[0] if stats else 0,
-            "max_points_single": stats[1] if stats else 0,
-            "unique_hashtags": stats[2] if stats else 0
-        }
-        
-    except sqlite3.Error as e:
-        logger.error(f"Error obteniendo estadísticas del usuario {user_id}: {e}")
+    if not basic_stats or basic_stats[0] == 0:
+        conn.close()
         return None
-    finally:
-        if conn:
-            conn.close()
-
-def get_top10() -> list:
-    """Obtener top 10 usuarios por puntos
     
-    Returns:
-        Lista de usuarios ordenados por puntos (descendente)
-    """
-    conn = None
+    total_points, total_contributions, username, member_since = basic_stats
+    current_level = calculate_level(total_points)
+    level_info = get_level_info(current_level)
+    
+    # Calculate points to next level
+    points_to_next = 0
+    if level_info["next_points"]:
+        points_to_next = level_info["next_points"] - total_points
+    
+    # Get recent contributions
+    cursor.execute(
+        """SELECT hashtag, points, timestamp
+           FROM points 
+           WHERE user_id = ? 
+           ORDER BY timestamp DESC 
+           LIMIT 5""",
+        (user_id,)
+    )
+    recent_contributions = cursor.fetchall()
+
+    # Get hashtag counts
+    cursor.execute(
+        """SELECT hashtag, COUNT(*) FROM points
+           WHERE user_id = ?
+           GROUP BY hashtag
+           ORDER BY COUNT(*) DESC""",
+        (user_id,)
+    )
+    hashtag_counts = {row[0]: row[1] for row in cursor.fetchall()}
+
+    # Get active days
+    cursor.execute(
+        """SELECT DISTINCT DATE(timestamp) FROM points
+           WHERE user_id = ?""",
+        (user_id,)
+    )
+    active_days = {row[0] for row in cursor.fetchall()}
+
+    # Get daily challenges this week
+    cursor.execute(
+        """SELECT COUNT(*) FROM points
+           WHERE user_id = ? AND is_challenge_bonus = 1
+           AND hashtag = '(reto_diario)'
+           AND strftime('%W', timestamp) = strftime('%W', 'now')""",
+        (user_id,)
+    )
+    daily_challenges_week = cursor.fetchone()[0]
+
+    # Check if weekly challenge is done
+    cursor.execute(
+        """SELECT 1 FROM points
+           WHERE user_id = ? AND is_challenge_bonus = 1
+           AND hashtag LIKE '#%' AND strftime('%W', timestamp) = strftime('%W', 'now')
+           LIMIT 1""",
+        (user_id,)
+    )
+    weekly_done = bool(cursor.fetchone())
+
+    # Get achievements
+    cursor.execute(
+        """SELECT achievement_id FROM user_achievements
+           WHERE user_id = ?""",
+        (user_id,)
+    )
+    achievements = [row[0] for row in cursor.fetchall()]
+
+    conn.close()
+    
+    return {
+        "username": username,
+        "points": total_points,
+        "count": total_contributions,
+        "level": current_level,
+        "level_name": level_info["name"],
+        "points_to_next": max(0, points_to_next),
+        "recent_contributions": recent_contributions,
+        "member_since": member_since,
+        "hashtag_counts": hashtag_counts,
+        "active_days": active_days,
+        "daily_challenges_week": daily_challenges_week,
+        "weekly_challenge_done": weekly_done,
+        "achievements": achievements
+    }
+
+def get_top10():
+    """Get top 10 users by points including their level"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            """SELECT username, points, level, count
-               FROM users 
-               ORDER BY points DESC, level DESC 
-               LIMIT 10"""
-        )
+        # Obtener usuarios con sus puntos totales y calcular nivel
+        cursor.execute("""
+            SELECT 
+                username, 
+                SUM(points) as total_points,
+                user_id
+            FROM points
+            GROUP BY user_id, username
+            ORDER BY total_points DESC
+            LIMIT 10
+        """)
         
         results = cursor.fetchall()
         
-        return [
-            {
-                "username": row[0],
-                "points": row[1],
-                "level": row[2],
-                "count": row[3],
-                "rank": i + 1
-            }
-            for i, row in enumerate(results)
-        ]
+        # Agregar nivel calculado a cada usuario
+        top_users = []
+        for username, total_points, user_id in results:
+            level = calculate_level(total_points)
+            top_users.append((username, total_points, level))
         
-    except sqlite3.Error as e:
-        logger.error(f"Error obteniendo top 10: {e}")
+        return top_users
+        
+    except Exception as e:
+        print(f"[ERROR] get_top10: {e}")
         return []
     finally:
-        if conn:
-            conn.close()
+        conn.close()
 
-def get_user_total_points(user_id: int) -> int:
-    """Obtener puntos totales de un usuario (versión pública)
+def set_chat_config(chat_id: int, chat_name: str, rankings_enabled: bool = True, challenges_enabled: bool = True):
+    """Configure chat settings"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT OR REPLACE INTO chat_config (chat_id, chat_name, rankings_enabled, challenges_enabled)
+           VALUES (?, ?, ?, ?)""",
+        (chat_id, chat_name, rankings_enabled, challenges_enabled)
+    )
+    conn.commit()
+    conn.close()
+
+def get_chat_config(chat_id: int):
+    """Get chat configuration"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT chat_name, rankings_enabled, challenges_enabled
+           FROM chat_config 
+           WHERE chat_id = ?""",
+        (chat_id,)
+    )
+    result = cursor.fetchone()
+    conn.close()
     
-    Args:
-        user_id: ID del usuario
-        
-    Returns:
-        Puntos totales del usuario
-    """
-    conn = None
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        return get_user_total_points_internal(cursor, user_id)
-    except sqlite3.Error as e:
-        logger.error(f"Error obteniendo puntos del usuario {user_id}: {e}")
-        return 0
-    finally:
-        if conn:
-            conn.close()
+    if result:
+        return {
+            "chat_name": result[0],
+            "rankings_enabled": bool(result[1]),
+            "challenges_enabled": bool(result[2])
+        }
+    return None
+
+def get_configured_chats():
+    """Get all configured chats"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """SELECT chat_id, chat_name, rankings_enabled, challenges_enabled
+           FROM chat_config
+           WHERE rankings_enabled = 1 OR challenges_enabled = 1"""
+    )
+    results = cursor.fetchall()
+    conn.close()
+    
+    return [
+        {
+            "chat_id": row[0],
+            "chat_name": row[1],
+            "rankings_enabled": bool(row[2]),
+            "challenges_enabled": bool(row[3])
+        }
+        for row in results
+    ]
