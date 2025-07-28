@@ -14,7 +14,7 @@ from comandos_basicos import (
 )
 from config import Config
 
-def post_init(application):
+async def post_init(application): # Esta es la línea corregida
     print("✅ Post-init completado")
 
 def main():
