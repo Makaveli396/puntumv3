@@ -114,7 +114,7 @@ def create_tables():
     )
     
     # --- Llamada para crear las tablas de juegos ---
-    create_games_tables(cursor)
+    create_games_tables(conn, cursor)
 
     conn.commit()
     conn.close()
