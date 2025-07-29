@@ -13,25 +13,26 @@ def create_games_tables(cursor):
     try:
         # Tabla para juegos activos
         cursor.execute(
-    """CREATE TABLE IF NOT EXISTS active_trivias (
-        chat_id INTEGER PRIMARY KEY,
-        pregunta TEXT,
-        respuesta TEXT,
-        start_time REAL,
-        started_by INTEGER
-    )"""
-)
+            """CREATE TABLE IF NOT EXISTS active_games (
+                chat_id INTEGER PRIMARY KEY,
+                game_type TEXT,
+                game_data TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )"""
+        )
         
         # Tabla para trivias activas
         cursor.execute(
             """CREATE TABLE IF NOT EXISTS active_trivias (
                 chat_id INTEGER PRIMARY KEY,
                 pregunta TEXT,
-                correct_answer TEXT,
-                options TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                respuesta TEXT,
+                start_time REAL,
+                started_by INTEGER
             )"""
         )
+        
+        # (El resto de la función sigue igual...)
         
         # Tabla para estadísticas de juegos
         cursor.execute(
