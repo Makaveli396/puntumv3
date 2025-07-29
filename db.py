@@ -1,15 +1,60 @@
+# db.py
 import sqlite3
 from datetime import datetime
 
 DB_PATH = "puntum.db"
 
 def get_connection():
+    """Obtiene una conexión a la base de datos."""
     return sqlite3.connect(DB_PATH)
 
+def create_games_tables(cursor):
+    """Crea las tablas necesarias para el sistema de juegos."""
+    try:
+        # Tabla para juegos activos
+        cursor.execute(
+            """CREATE TABLE IF NOT EXISTS active_games (
+                chat_id INTEGER PRIMARY KEY,
+                game_type TEXT,
+                game_data TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )"""
+        )
+        
+        # Tabla para trivias activas
+        cursor.execute(
+            """CREATE TABLE IF NOT EXISTS active_trivias (
+                chat_id INTEGER PRIMARY KEY,
+                pregunta TEXT,
+                correct_answer TEXT,
+                options TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )"""
+        )
+        
+        # Tabla para estadísticas de juegos
+        cursor.execute(
+            """CREATE TABLE IF NOT EXISTS game_stats (
+                user_id INTEGER,
+                username TEXT,
+                game_type TEXT,
+                wins INTEGER DEFAULT 0,
+                total_games INTEGER DEFAULT 0,
+                last_played TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, game_type)
+            )"""
+        )
+        print("✅ Tablas de juegos creadas/verificadas exitosamente.")
+        
+    except Exception as e:
+        print(f"❌ Error creando tablas de juegos: {e}")
+
 def create_tables():
+    """Crea todas las tablas de la base de datos si no existen."""
     conn = get_connection()
     cursor = conn.cursor()
 
+    # --- Tablas principales ---
     cursor.execute(
         """CREATE TABLE IF NOT EXISTS points (
             user_id INTEGER,
@@ -32,7 +77,6 @@ def create_tables():
         )"""
     )
 
-    # Create users table if it doesn't exist (for better user management)
     cursor.execute(
         """CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY,
@@ -44,7 +88,6 @@ def create_tables():
         )"""
     )
 
-    # Create chat_config table for chat management
     cursor.execute(
         """CREATE TABLE IF NOT EXISTS chat_config (
             chat_id INTEGER PRIMARY KEY,
@@ -54,9 +97,15 @@ def create_tables():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )"""
     )
+    
+    # --- Llamada para crear las tablas de juegos ---
+    create_games_tables(cursor)
 
     conn.commit()
     conn.close()
+
+# (El resto de tus funciones como add_points, get_user_stats, etc., permanecen igual)
+# ... (No las incluyo aquí por brevedad, solo asegúrate de que estén después de las funciones de creación de tablas)
 
 def add_points(user_id, username, points, hashtag=None, message_text=None, chat_id=None, message_id=None, is_challenge_bonus=False, context=None):
     conn = get_connection()
@@ -332,137 +381,3 @@ def get_configured_chats():
         }
         for row in results
     ]
-# Agregar estas funciones al final de tu db.py actual
-
-def create_games_tables():
-    """Crear tablas necesarias para el sistema de juegos"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    try:
-        # Tabla para juegos activos (diccionario en memoria convertido a tabla)
-        cursor.execute(
-            """CREATE TABLE IF NOT EXISTS active_games (
-                chat_id INTEGER PRIMARY KEY,
-                game_type TEXT,
-                game_data TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )"""
-        )
-        
-        # Tabla para trivias activas
-        cursor.execute(
-            """CREATE TABLE IF NOT EXISTS active_trivias (
-                chat_id INTEGER PRIMARY KEY,
-                question TEXT,
-                correct_answer TEXT,
-                options TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )"""
-        )
-        
-        # Tabla para estadísticas de juegos
-        cursor.execute(
-            """CREATE TABLE IF NOT EXISTS game_stats (
-                user_id INTEGER,
-                username TEXT,
-                game_type TEXT,
-                wins INTEGER DEFAULT 0,
-                total_games INTEGER DEFAULT 0,
-                last_played TEXT DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (user_id, game_type)
-            )"""
-        )
-        
-        conn.commit()
-        print("✅ Tablas de juegos creadas exitosamente")
-        
-    except Exception as e:
-        print(f"❌ Error creando tablas de juegos: {e}")
-    finally:
-        conn.close()
-
-# Modificar tu función create_tables() existente
-# Agregar esta línea al final de create_tables():
-# create_games_tables()
-
-def create_tables():
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """CREATE TABLE IF NOT EXISTS points (
-            user_id INTEGER,
-            username TEXT,
-            points INTEGER,
-            hashtag TEXT,
-            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-            chat_id INTEGER,
-            message_id INTEGER,
-            is_challenge_bonus INTEGER DEFAULT 0
-        )"""
-    )
-
-    cursor.execute(
-        """CREATE TABLE IF NOT EXISTS user_achievements (
-            user_id INTEGER,
-            achievement_id INTEGER,
-            date TEXT DEFAULT CURRENT_DATE,
-            PRIMARY KEY (user_id, achievement_id)
-        )"""
-    )
-
-    cursor.execute(
-        """CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
-            username TEXT,
-            points INTEGER DEFAULT 0,
-            count INTEGER DEFAULT 0,
-            level INTEGER DEFAULT 1,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )"""
-    )
-
-    cursor.execute(
-        """CREATE TABLE IF NOT EXISTS chat_config (
-            chat_id INTEGER PRIMARY KEY,
-            chat_name TEXT,
-            rankings_enabled BOOLEAN DEFAULT 1,
-            challenges_enabled BOOLEAN DEFAULT 1,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )"""
-    )
-
-    conn.commit()
-    conn.close()
-    
-    # AGREGAR ESTA LÍNEA AL FINAL:
-   
-def create_games_tables():
-    """Crear tablas necesarias para el sistema de juegos"""
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    try:
-        # ... (la tabla active_games no cambia) ...
-
-        # Cambia "question" por "pregunta" aquí
-        cursor.execute(
-            """CREATE TABLE IF NOT EXISTS active_trivias (
-                chat_id INTEGER PRIMARY KEY,
-                pregunta TEXT,  -- <--- CAMBIO AQUÍ
-                correct_answer TEXT,
-                options TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )"""
-        )
-
-        # ... (el resto de la función no cambia) ...
-
-        conn.commit()
-        print("✅ Tablas de juegos creadas exitosamente")
-
-    except Exception as e:
-        print(f"❌ Error creando tablas de juegos: {e}")
-    finally:
-        conn.close()
