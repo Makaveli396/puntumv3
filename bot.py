@@ -69,8 +69,8 @@ async def route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Si no hay juegos, procesar hashtags
         await handle_hashtags(update, context)
 
-async def on_startup(app: Application):
-    """Función que se ejecuta al iniciar el bot"""
+async def initialize_bot():
+    """Función para inicializar el bot"""
     print("🔧 Creando tablas de base de datos...")
     from db import create_tables
     create_tables()
@@ -120,7 +120,13 @@ def main():
 
     # ======= EJECUTAR BOT =======
     print("🚀 Iniciando bot...")
-    app.run_polling(on_startup=on_startup)
+    
+    # Inicializar bot de forma síncrona
+    import asyncio
+    asyncio.run(initialize_bot())
+    
+    # Ejecutar bot
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
