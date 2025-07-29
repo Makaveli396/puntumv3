@@ -144,3 +144,75 @@ async def cmd_cinematrivia(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except Exception as e:
         logger.error(f"Error en trivia: {e}")
         await update.message.reply_text("Ocurrió un error al generar la trivia. Intenta más tarde.")
+
+async def cmd_adivinapelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+
+    if chat_id in active_games:
+        await update.message.reply_text("¡Ya hay un juego activo en este chat!")
+        return
+
+    peliculas = [
+        ("El Padrino", "película de mafia de 1972 dirigida por Francis Ford Coppola"),
+        ("Titanic", "película romántica de 1997 sobre un barco que se hunde"),
+        ("Star Wars", "película de ciencia ficción con jedis y sables de luz"),
+        ("El Señor de los Anillos", "trilogía de fantasía con hobbits y un anillo")
+    ]
+
+    pelicula, pista = random.choice(peliculas)
+    active_games[chat_id] = {
+        'juego': 'adivinapelicula',
+        'respuesta': pelicula,
+        'pistas': [pista],
+        'intentos': 0,
+        'started_by': user.id,
+        'last_activity': time.time()
+    }
+
+    save_active_games_to_db()
+
+    await update.message.reply_text(
+        "🎬 ADIVINA LA PELÍCULA 🍿\n\nEstoy pensando en una película...\n"
+        f"Pista: {pista}\n\nResponde con el título de la película. ¡Tienes 3 intentos!"
+    )
+
+async def cmd_emojipelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+
+    if chat_id in active_games:
+        await update.message.reply_text("¡Ya hay un juego activo en este chat!")
+        return
+
+    emoji_peliculas = {
+        "🦁👑": "El Rey León", "👽📞": "E.T.", "👻🚫": "Cazafantasmas",
+        "🦈🎶": "Tiburón", "🧙‍♂️⚡": "Harry Potter", "🧛‍♂️💍": "El Señor de los Anillos",
+        "🚀👨‍🚀": "Apollo 13", "🦸‍♂️🦇": "Batman", "👩‍🚀🌌": "Interstellar"
+    }
+
+    emojis, respuesta = random.choice(list(emoji_peliculas.items()))
+    active_games[chat_id] = {
+        'juego': 'emojipelicula',
+        'respuesta': respuesta,
+        'pistas': [],
+        'intentos': 0,
+        'started_by': user.id,
+        'last_activity': time.time()
+    }
+
+    save_active_games_to_db()
+
+    await update.message.reply_text(
+        "🎬 ADIVINA LA PELÍCULA POR EMOJIS 🍿\n\n"
+        f"¿Qué película es esta? {emojis}\n\nResponde con el título exacto de la película. ¡Tienes 3 intentos!"
+    )
+__all__ = [
+    "cmd_cinematrivia",
+    "cmd_adivinapelicula",
+    "cmd_emojipelicula",
+    "initialize_games_system",
+    "cleanup_games_periodically",
+    "active_games",
+    "active_trivias"
+]
