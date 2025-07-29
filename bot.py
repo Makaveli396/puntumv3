@@ -123,10 +123,18 @@ def main():
     
     # Inicializar bot de forma síncrona
     import asyncio
-    asyncio.run(initialize_bot())
-    
-    # Ejecutar bot
-    app.run_polling()
+    try:
+        # Para Render y entornos de producción
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(initialize_bot())
+        
+        # Ejecutar bot
+        app.run_polling()
+    except RuntimeError:
+        # Alternativa para entornos locales
+        asyncio.run(initialize_bot())
+        app.run_polling()
 
 if __name__ == "__main__":
     main()
