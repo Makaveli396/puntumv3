@@ -29,6 +29,10 @@ from juegos import (
     cmd_cinematrivia,
     cmd_adivinapelicula,
     cmd_emojipelicula,
+    cmd_pista,
+    cmd_rendirse,
+    handle_game_message,
+    handle_trivia_callback,
     initialize_games_system,
     active_games,
     active_trivias
