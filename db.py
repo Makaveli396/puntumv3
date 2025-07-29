@@ -437,4 +437,32 @@ def create_tables():
     conn.close()
     
     # AGREGAR ESTA LÍNEA AL FINAL:
-    create_games_tables()
+   
+def create_games_tables():
+    """Crear tablas necesarias para el sistema de juegos"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        # ... (la tabla active_games no cambia) ...
+
+        # Cambia "question" por "pregunta" aquí
+        cursor.execute(
+            """CREATE TABLE IF NOT EXISTS active_trivias (
+                chat_id INTEGER PRIMARY KEY,
+                pregunta TEXT,  -- <--- CAMBIO AQUÍ
+                correct_answer TEXT,
+                options TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )"""
+        )
+
+        # ... (el resto de la función no cambia) ...
+
+        conn.commit()
+        print("✅ Tablas de juegos creadas exitosamente")
+
+    except Exception as e:
+        print(f"❌ Error creando tablas de juegos: {e}")
+    finally:
+        conn.close()
