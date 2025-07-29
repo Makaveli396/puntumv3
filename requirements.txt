@@ -2,11 +2,5 @@
 python-telegram-bot==20.7
 requests==2.31.0
 
-# Base de datos
-sqlite3
-
 # Utilidades
 python-dotenv==1.0.0
-
-# Opcional para logs
-logging
