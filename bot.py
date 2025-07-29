@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -28,10 +29,6 @@ from juegos import (
     cmd_cinematrivia,
     cmd_adivinapelicula,
     cmd_emojipelicula,
-    cmd_pista,
-    cmd_rendirse,
-    handle_game_message,
-    handle_trivia_callback,
     initialize_games_system,
     active_games,
     active_trivias
@@ -52,7 +49,6 @@ try:
     from config import Config
     BOT_TOKEN = Config.BOT_TOKEN
 except (ImportError, AttributeError):
-    import os
     BOT_TOKEN = os.environ.get("BOT_TOKEN")
     if not BOT_TOKEN:
         print("❌ Error: BOT_TOKEN no está definido.")
