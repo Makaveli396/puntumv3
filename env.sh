@@ -10,6 +10,10 @@ BOT_TOKEN=8057941462:AAF8T-ryrPZ41XF9ySLqjphZT0EPCKhuCM8
 # Para obtener tu ID, envía un mensaje a @userinfobot
 ADMIN_IDS=5548909327,5436009474
 
+# OPCIONAL: Clave API de TMDB para preguntas de trivia avanzadas
+# Regístrate en https://www.themoviedb.org/settings/api
+TMDB_API_KEY=17bb8342bff5717c23c85b661d8bb512
+
 # ====================================
 # CONFIGURACIÓN DE BASE DE DATOS
 # ====================================
@@ -39,26 +43,3 @@ PORT=8000
 
 # URL externa del webhook (Render, Heroku, etc.)
 RENDER_EXTERNAL_URL=https://tu-app.render.com
-
-# ====================================
-# CONFIGURACIÓN DE JUEGOS
-# ====================================
-
-# Tiempo límite para juegos en segundos (300 = 5 minutos)
-GAME_TIMEOUT=300
-
-# Máximo número de pistas por juego
-MAX_HINTS=3
-
-# ====================================
-# CONFIGURACIÓN AVANZADA (OPCIONAL)
-# ====================================
-
-# Intervalo de respaldo automático en horas
-BACKUP_INTERVAL=24
-
-# Días para mantener logs antiguos
-LOG_RETENTION_DAYS=30
-
-# Límite de mensajes por usuario por minuto
-RATE_LIMIT=10
