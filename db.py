@@ -2,48 +2,61 @@
 import sqlite3
 from datetime import datetime
 
-DB_PATH = "puntum.db"
+# --- CONFIGURACIÓN ANTERIOR A RENDER ---
+# import os
+# from config import Config
+# DB_PATH = os.environ.get("DB_PATH", "puntum.db") 
+
+# --- CONFIGURACIÓN PARA RENDER ---
+# Usar PostgreSQL en Render, SQLite para desarrollo local
+import os
+
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 def get_connection():
     """Obtiene una conexión a la base de datos."""
-    return sqlite3.connect(DB_PATH)
+    if DATABASE_URL:
+        # Entorno de producción (Render)
+        import psycopg2
+        return psycopg2.connect(DATABASE_URL)
+    else:
+        # Entorno local
+        return sqlite3.connect("puntum.db")
 
-def create_games_tables(cursor):
+def create_games_tables(conn, cursor):
     """Crea las tablas necesarias para el sistema de juegos."""
     try:
         # Tabla para juegos activos
         cursor.execute(
             """CREATE TABLE IF NOT EXISTS active_games (
-                chat_id INTEGER PRIMARY KEY,
-                game_type TEXT,
+                chat_id BIGINT PRIMARY KEY,
+                juego TEXT,
                 game_data TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             )"""
         )
         
         # Tabla para trivias activas
         cursor.execute(
             """CREATE TABLE IF NOT EXISTS active_trivias (
-                chat_id INTEGER PRIMARY KEY,
+                chat_id BIGINT PRIMARY KEY,
                 pregunta TEXT,
                 respuesta TEXT,
                 start_time REAL,
-                started_by INTEGER
+                started_by BIGINT
             )"""
         )
-        
-        # (El resto de la función sigue igual...)
         
         # Tabla para estadísticas de juegos
         cursor.execute(
             """CREATE TABLE IF NOT EXISTS game_stats (
-                user_id INTEGER,
+                user_id BIGINT,
                 username TEXT,
-                game_type TEXT,
+                juego TEXT,
                 wins INTEGER DEFAULT 0,
                 total_games INTEGER DEFAULT 0,
-                last_played TEXT DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (user_id, game_type)
+                last_played TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, juego)
             )"""
         )
         print("✅ Tablas de juegos creadas/verificadas exitosamente.")
@@ -59,44 +72,44 @@ def create_tables():
     # --- Tablas principales ---
     cursor.execute(
         """CREATE TABLE IF NOT EXISTS points (
-            user_id INTEGER,
+            user_id BIGINT,
             username TEXT,
             points INTEGER,
             hashtag TEXT,
-            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-            chat_id INTEGER,
-            message_id INTEGER,
+            timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            chat_id BIGINT,
+            message_id BIGINT,
             is_challenge_bonus INTEGER DEFAULT 0
         )"""
     )
 
     cursor.execute(
         """CREATE TABLE IF NOT EXISTS user_achievements (
-            user_id INTEGER,
+            user_id BIGINT,
             achievement_id INTEGER,
-            date TEXT DEFAULT CURRENT_DATE,
+            date DATE DEFAULT CURRENT_DATE,
             PRIMARY KEY (user_id, achievement_id)
         )"""
     )
 
     cursor.execute(
         """CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
+            id BIGINT PRIMARY KEY,
             username TEXT,
             points INTEGER DEFAULT 0,
             count INTEGER DEFAULT 0,
             level INTEGER DEFAULT 1,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )"""
     )
 
     cursor.execute(
         """CREATE TABLE IF NOT EXISTS chat_config (
-            chat_id INTEGER PRIMARY KEY,
+            chat_id BIGINT PRIMARY KEY,
             chat_name TEXT,
-            rankings_enabled BOOLEAN DEFAULT 1,
-            challenges_enabled BOOLEAN DEFAULT 1,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            rankings_enabled BOOLEAN DEFAULT TRUE,
+            challenges_enabled BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )"""
     )
     
