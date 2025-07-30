@@ -156,6 +156,16 @@ def create_user_tables(conn, cursor):
                     PRIMARY KEY (user_id, chat_id)
                 )"""
             )
+            # Ejemplo: crear una tabla para hashtags si la necesitas
+            # cursor.execute(
+            #     """CREATE TABLE IF NOT EXISTS user_hashtags (
+            #         id SERIAL PRIMARY KEY,
+            #         user_id BIGINT NOT NULL,
+            #         chat_id BIGINT NOT NULL,
+            #         hashtag TEXT NOT NULL,
+            #         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            #     )"""
+            # )
         else: # SQLite
             cursor.execute(
                 """CREATE TABLE IF NOT EXISTS user_points (
@@ -180,6 +190,16 @@ def create_user_tables(conn, cursor):
                     PRIMARY KEY (user_id, chat_id)
                 )"""
             )
+            # Ejemplo: crear una tabla para hashtags si la necesitas
+            # cursor.execute(
+            #     """CREATE TABLE IF NOT EXISTS user_hashtags (
+            #         id INTEGER PRIMARY KEY AUTOINCREMENT,
+            #         user_id INTEGER NOT NULL,
+            #         chat_id INTEGER NOT NULL,
+            #         hashtag TEXT NOT NULL,
+            #         created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            #     )"""
+            # )
         conn.commit()
     except Exception as e:
         print(f"Error al crear tablas de usuario: {e}")
@@ -457,3 +477,93 @@ def get_configured_chats():
             "challenges_enabled": bool(row[3])
         })
     return configured_chats
+
+def get_user_stats(user_id: int, chat_id: int):
+    """Obtiene las estadísticas de un usuario específico en un chat."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    total_points = 0
+    hashtag_counts = {}
+
+    try:
+        if DATABASE_URL: # PostgreSQL
+            # Obtener puntos totales
+            cursor.execute(
+                """SELECT total_points FROM user_ranking
+                   WHERE user_id = %s AND chat_id = %s""",
+                (user_id, chat_id)
+            )
+            result = cursor.fetchone()
+            if result:
+                total_points = result[0]
+            
+            # Si tienes una tabla 'user_hashtags' para conteo de hashtags, puedes añadir aquí la consulta:
+            # cursor.execute(
+            #     """SELECT hashtag, COUNT(*) as count FROM user_hashtags
+            #        WHERE user_id = %s AND chat_id = %s
+            #        GROUP BY hashtag
+            #        ORDER BY count DESC
+            #        LIMIT 10""",
+            #     (user_id, chat_id)
+            # )
+            # hashtag_rows = cursor.fetchall()
+            # for hashtag, count in hashtag_rows:
+            #     hashtag_counts[hashtag] = count
+
+        else: # SQLite
+            # Obtener puntos totales
+            cursor.execute(
+                """SELECT total_points FROM user_ranking
+                   WHERE user_id = ? AND chat_id = ?""",
+                (user_id, chat_id)
+            )
+            result = cursor.fetchone()
+            if result:
+                total_points = result[0]
+            
+            # Si tienes una tabla 'user_hashtags' para conteo de hashtags, puedes añadir aquí la consulta:
+            # cursor.execute(
+            #     """SELECT hashtag, COUNT(*) as count FROM user_hashtags
+            #        WHERE user_id = ? AND chat_id = ?
+            #        GROUP BY hashtag
+            #        ORDER BY count DESC
+            #        LIMIT 10""",
+            #     (user_id, chat_id)
+            # )
+            # hashtag_rows = cursor.fetchall()
+            # for hashtag, count in hashtag_rows:
+            #     hashtag_counts[hashtag] = count
+
+    except Exception as e:
+        print(f"Error al obtener estadísticas de usuario: {e}")
+    finally:
+        conn.close()
+    
+    return {'total_points': total_points, 'hashtag_counts': hashtag_counts}
+
+def get_top10(chat_id: int):
+    """Obtiene el top 10 de usuarios en un chat."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    if DATABASE_URL: # PostgreSQL
+        cursor.execute(
+            """SELECT username, total_points FROM user_ranking 
+               WHERE chat_id = %s
+               ORDER BY total_points DESC
+               LIMIT 10
+            """,
+            (chat_id,)
+        )
+    else: # SQLite
+        cursor.execute(
+            """SELECT username, total_points FROM user_ranking 
+               WHERE chat_id = ?
+               ORDER BY total_points DESC
+               LIMIT 10
+            """,
+            (chat_id,)
+        )
+    results = cursor.fetchall()
+    conn.close()
+    return results
