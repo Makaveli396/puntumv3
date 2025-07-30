@@ -62,6 +62,8 @@ except (ImportError, AttributeError):
         exit()
 
 # Servidor HTTP simple para Render
+# ... (código anterior)
+
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/health':
@@ -71,9 +73,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.wfile.write(b'Bot is running!')
         elif self.path == '/':
             self.send_response(200)
-            self.send_header('Content-type', 'text/html')
+            self.send_header('Content-type', 'text/html; charset=utf-8') # Añade charset=utf-8
             self.end_headers()
-            self.wfile.write(b'''
+            
+            # Codifica el string a bytes usando UTF-8
+            html_content = """
             <!DOCTYPE html>
             <html>
             <head><title>Cinema Bot</title></head>
@@ -82,7 +86,8 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 <p>Bot de Telegram funcionando correctamente.</p>
             </body>
             </html>
-            ''')
+            """
+            self.wfile.write(html_content.encode('utf-8')) # .encode('utf-8') aquí
         else:
             self.send_response(404)
             self.end_headers()
@@ -90,6 +95,8 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # Suprimir logs del servidor HTTP
         pass
+
+# ... (resto del código)
 
 def start_health_server():
     """Inicia servidor HTTP para health checks"""
