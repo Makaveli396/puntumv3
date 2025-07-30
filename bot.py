@@ -226,6 +226,15 @@ def main() -> None:
     """Función principal del bot"""
     logger.info("🚀 Iniciando Puntum Bot...")
     
+    # VERIFICACIÓN ADICIONAL: Asegurar que BOT_TOKEN esté disponible
+    logger.info(f"🔍 Verificando BOT_TOKEN antes de crear aplicación...")
+    logger.info(f"🔍 BOT_TOKEN disponible: {BOT_TOKEN is not None}")
+    logger.info(f"🔍 BOT_TOKEN longitud: {len(BOT_TOKEN) if BOT_TOKEN else 'None'}")
+    
+    if not BOT_TOKEN:
+        logger.error("❌ Error crítico: BOT_TOKEN es None en main()")
+        exit(1)
+    
     # Iniciar el servidor de health check en un hilo separado
     health_check_port = int(os.environ.get("PORT", 10000))
     health_thread = threading.Thread(
@@ -238,10 +247,12 @@ def main() -> None:
 
     # Construir la aplicación del bot
     try:
+        logger.info(f"🔧 Creando ApplicationBuilder con token de longitud {len(BOT_TOKEN)}")
         app = ApplicationBuilder.token(BOT_TOKEN).build()
         logger.info("✅ Aplicación de Telegram creada exitosamente")
     except Exception as e:
         logger.error(f"❌ Error creando aplicación de Telegram: {e}")
+        logger.error(f"🔍 BOT_TOKEN en el momento del error: {type(BOT_TOKEN)} - {BOT_TOKEN is not None}")
         exit(1)
 
     # ======= MANEJADORES DE COMANDOS =======
