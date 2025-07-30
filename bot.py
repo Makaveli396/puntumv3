@@ -62,7 +62,17 @@ from db import (
 )
 from db import get_configured_chats, save_chat_config, get_chat_config # Importar configuración de chats
 
-# Importar configuración
+# Configurar logging
+import logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Cargar configuración del bot
+BOT_TOKEN = None
+ADMIN_USER_ID = None
+
 try:
     from config import Config
     BOT_TOKEN = Config.BOT_TOKEN
@@ -70,18 +80,15 @@ try:
 except (ImportError, AttributeError):
     BOT_TOKEN = os.environ.get("BOT_TOKEN")
     ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")
-    if not BOT_TOKEN:
-        print("❌ Error: BOT_TOKEN no está definido.")
-        exit()
-    if not ADMIN_USER_ID:
-        print("❌ Advertencia: ADMIN_USER_ID no está definido. Algunas funciones de administración podrían no estar disponibles.")
 
-# Configurar logging
-import logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# Verificar si BOT_TOKEN está definido y no está vacío
+if not BOT_TOKEN:
+    logger.error("❌ Error: BOT_TOKEN no está definido o está vacío. Por favor, configura la variable de entorno BOT_TOKEN.")
+    exit(1) # Salir si el token no está disponible
+
+if not ADMIN_USER_ID:
+    logger.warning("❌ Advertencia: ADMIN_USER_ID no está definido. Algunas funciones de administración podrían no estar disponibles.")
+
 
 # Clase de servidor HTTP para mantener el servicio activo en Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -148,6 +155,9 @@ async def initialize_bot():
     logger.info("Sistema de juegos inicializado.")
 
     # Iniciar el chequeo de juegos activos en segundo plano
+    # Importar juegos solo aquí si es necesario para evitar circular imports si juegos.py depende de bot.py
+    # Pero si initialize_games_system ya está importado, check_active_games debería estar bien.
+    import juegos # Importar juegos de nuevo para acceder a juegos.check_active_games()
     asyncio.create_task(juegos.check_active_games())
     logger.info("Tarea de chequeo de juegos activos programada.")
 
@@ -193,7 +203,7 @@ def main() -> None:
     ))
 
     # ======= EJECUTAR BOT =======
-    print("🚀 Iniciando bot...")
+    logger.info("🚀 Iniciando bot...")
     
     # Inicializar bot de forma síncrona
     try:
@@ -205,22 +215,13 @@ def main() -> None:
         loop.run_until_complete(initialize_bot())
         
         # Ejecutar bot
-        app.run_polling()
+        app.run_polling(poll_interval=1.0) # Añadir poll_interval para manejar la terminación gracefully
     except RuntimeError as e:
         logger.error(f"Error al iniciar el bucle de eventos principal: {e}")
-        # Alternativa para entornos locales (si ya hay un loop corriendo, intentar con get_event_loop)
-        try:
-            current_loop = asyncio.get_event_loop()
-            if current_loop.is_running():
-                # Si ya hay un loop, schedule initialize_bot como una tarea
-                asyncio.create_task(initialize_bot())
-            else:
-                # Si no hay un loop, pero RuntimeError fue por otra razón
-                current_loop.run_until_complete(initialize_bot())
-            app.run_polling()
-        except Exception as inner_e:
-            logger.error(f"Fallo en la alternativa de inicialización: {inner_e}")
-            print("❌ No se pudo iniciar el bot. Verifica los logs para más detalles.")
+        # La lógica de fallback con asyncio.run o get_event_loop no es lo más robusto aquí.
+        # Es mejor asegurar que el BOT_TOKEN esté bien definido al inicio.
+        # Eliminamos la lógica de fallback para simplificar y enfocarnos en la causa raíz.
+        logger.error("No se pudo iniciar el bot. Verifica los logs para más detalles.")
 
 
 if __name__ == "__main__":
