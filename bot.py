@@ -69,69 +69,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Cargar configuración del bot - MEJORADO
+# Cargar configuración del bot - SIMPLIFICADO
 def load_config():
-    """Carga la configuración del bot desde archivo o variables de entorno"""
-    bot_token = None
-    admin_user_id = None
-    config_source = "variables de entorno"
-    
-    # Intentar cargar desde config.py primero
+    """Carga la configuración del bot desde config.py"""
     try:
         from config import Config
-        config_bot_token = getattr(Config, 'BOT_TOKEN', None)
-        config_admin_id = getattr(Config, 'ADMIN_USER_ID', None)
         
-        if config_bot_token:  # Solo usar si realmente tiene un valor
-            bot_token = config_bot_token
-            config_source = "config.py"
-        if config_admin_id:
-            admin_user_id = config_admin_id
-            
-        logger.info("✅ Archivo config.py encontrado")
-    except (ImportError, AttributeError) as e:
-        logger.info("📁 No se encontró config.py, usando variables de entorno")
-    
-    # Si no se encuentra en config.py, usar variables de entorno
-    if not bot_token:
-        bot_token = os.environ.get("BOT_TOKEN")
-        config_source = "variables de entorno"
-    
-    if not admin_user_id:
-        admin_user_id = os.environ.get("ADMIN_USER_ID")
-    
-    # Validar BOT_TOKEN
-    if not bot_token or bot_token.strip() == "":
-        logger.error("❌ Error crítico: BOT_TOKEN no está definido o está vacío.")
-        logger.error("💡 Soluciones:")
-        logger.error("   1. Configura la variable de entorno BOT_TOKEN en Render")
-        logger.error("   2. O modifica config.py para incluir directamente: BOT_TOKEN = 'tu_token_aqui'")
-        logger.error(f"🔍 Fuente de configuración: {config_source}")
+        # Validar configuración
+        Config.validate_config()
+        
+        bot_token = Config.BOT_TOKEN
+        admin_user_id = Config.ADMIN_IDS[0] if Config.ADMIN_IDS else None
+        
+        logger.info(f"✅ Configuración cargada desde config.py")
+        logger.info(f"✅ BOT_TOKEN disponible (longitud: {len(bot_token)})")
+        
+        if admin_user_id:
+            logger.info(f"✅ ADMIN_USER_ID configurado: {admin_user_id}")
+        else:
+            logger.warning("⚠️ ADMIN_USER_ID no está definido. Algunas funciones de administración no estarán disponibles.")
+        
+        return bot_token, admin_user_id
+        
+    except Exception as e:
+        logger.error(f"❌ Error cargando configuración: {e}")
+        logger.error("💡 Verifica que:")
+        logger.error("   1. La variable de entorno BOT_TOKEN esté configurada en Render")
+        logger.error("   2. El token tenga el formato correcto: 123456789:ABC...")
         exit(1)
-    
-    # Validar formato del token (básico)
-    if not bot_token.count(':') == 1 or len(bot_token) < 30:
-        logger.error("❌ Error: BOT_TOKEN no tiene el formato correcto de Telegram")
-        logger.error("💡 El token debe tener el formato: 123456789:ABCdefGHIjklMNOpqrSTUvwxyz")
-        logger.error(f"🔍 Token recibido (primeros 20 chars): '{bot_token[:20]}...'")
-        exit(1)
-    
-    # Convertir ADMIN_USER_ID a int si existe
-    if admin_user_id:
-        try:
-            admin_user_id = int(admin_user_id)
-        except ValueError:
-            logger.warning("⚠️ ADMIN_USER_ID no es un número válido, se ignorará")
-            admin_user_id = None
-    
-    if not admin_user_id:
-        logger.warning("⚠️ ADMIN_USER_ID no está definido. Algunas funciones de administración no estarán disponibles.")
-    
-    logger.info(f"✅ BOT_TOKEN cargado desde {config_source} (longitud: {len(bot_token)})")
-    if admin_user_id:
-        logger.info(f"✅ ADMIN_USER_ID configurado: {admin_user_id}")
-    
-    return bot_token, admin_user_id
 
 # Cargar configuración
 BOT_TOKEN, ADMIN_USER_ID = load_config()
