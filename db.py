@@ -372,6 +372,11 @@ def get_user_rank(user_id: int, chat_id: int):
         cursor.close()
         conn.close()
 
+# Función para compatibilidad con comandos_basicos.py
+def get_top10(chat_id: int):
+    """Obtener top 10 usuarios (alias para get_top_users)"""
+    return get_top_users(chat_id, 10)
+
 def update_user_ranking_points(user_id: int, chat_id: int, new_total_points: int, username: str, chat_name: str):
     """Actualizar puntos totales de un usuario"""
     conn = get_connection()
@@ -1196,4 +1201,3 @@ if __name__ == "__main__":
         logger.info("🎉 Base de datos lista para usar!")
     else:
         logger.error("💥 Error en la inicialización de la base de datos")
-                '
