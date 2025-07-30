@@ -69,26 +69,61 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Cargar configuración del bot
-BOT_TOKEN = None
-ADMIN_USER_ID = None
+# Cargar configuración del bot - MEJORADO
+def load_config():
+    """Carga la configuración del bot desde archivo o variables de entorno"""
+    bot_token = None
+    admin_user_id = None
+    
+    # Intentar cargar desde config.py primero
+    try:
+        from config import Config
+        bot_token = getattr(Config, 'BOT_TOKEN', None)
+        admin_user_id = getattr(Config, 'ADMIN_USER_ID', None)
+        logger.info("✅ Configuración cargada desde config.py")
+    except (ImportError, AttributeError) as e:
+        logger.info("📁 No se encontró config.py, usando variables de entorno")
+    
+    # Si no se encuentra en config.py, usar variables de entorno
+    if not bot_token:
+        bot_token = os.environ.get("BOT_TOKEN")
+    
+    if not admin_user_id:
+        admin_user_id = os.environ.get("ADMIN_USER_ID")
+    
+    # Validar BOT_TOKEN
+    if not bot_token or bot_token.strip() == "":
+        logger.error("❌ Error crítico: BOT_TOKEN no está definido o está vacío.")
+        logger.error("💡 Soluciones:")
+        logger.error("   1. Crea un archivo config.py con: class Config: BOT_TOKEN = 'tu_token_aqui'")
+        logger.error("   2. O configura la variable de entorno BOT_TOKEN")
+        exit(1)
+    
+    # Validar formato del token (básico)
+    if not bot_token.count(':') == 1 or len(bot_token) < 30:
+        logger.error("❌ Error: BOT_TOKEN no tiene el formato correcto de Telegram")
+        logger.error("💡 El token debe tener el formato: 123456789:ABCdefGHIjklMNOpqrSTUvwxyz")
+        exit(1)
+    
+    # Convertir ADMIN_USER_ID a int si existe
+    if admin_user_id:
+        try:
+            admin_user_id = int(admin_user_id)
+        except ValueError:
+            logger.warning("⚠️ ADMIN_USER_ID no es un número válido, se ignorará")
+            admin_user_id = None
+    
+    if not admin_user_id:
+        logger.warning("⚠️ ADMIN_USER_ID no está definido. Algunas funciones de administración no estarán disponibles.")
+    
+    logger.info(f"✅ BOT_TOKEN cargado (longitud: {len(bot_token)})")
+    if admin_user_id:
+        logger.info(f"✅ ADMIN_USER_ID configurado: {admin_user_id}")
+    
+    return bot_token, admin_user_id
 
-try:
-    from config import Config
-    BOT_TOKEN = Config.BOT_TOKEN
-    ADMIN_USER_ID = Config.ADMIN_USER_ID
-except (ImportError, AttributeError):
-    BOT_TOKEN = os.environ.get("BOT_TOKEN")
-    ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")
-
-# Verificar si BOT_TOKEN está definido y no está vacío
-if not BOT_TOKEN:
-    logger.error("❌ Error: BOT_TOKEN no está definido o está vacío. Por favor, configura la variable de entorno BOT_TOKEN.")
-    exit(1) # Salir si el token no está disponible
-
-if not ADMIN_USER_ID:
-    logger.warning("❌ Advertencia: ADMIN_USER_ID no está definido. Algunas funciones de administración podrían no estar disponibles.")
-
+# Cargar configuración
+BOT_TOKEN, ADMIN_USER_ID = load_config()
 
 # Clase de servidor HTTP para mantener el servicio activo en Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -96,18 +131,40 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
         self.end_headers()
-        self.wfile.write(b"Bot is running!")
+        response = f"""
+        <html>
+        <body>
+        <h1>🤖 Puntum Bot Status</h1>
+        <p>✅ Bot is running!</p>
+        <p>🕒 Status checked at: {os.popen('date').read().strip()}</p>
+        <p>🔧 Python version: {os.popen('python3 --version').read().strip()}</p>
+        </body>
+        </html>
+        """
+        self.wfile.write(response.encode())
+    
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+    
+    def log_message(self, format, *args):
+        # Silenciar logs del servidor HTTP para reducir spam
+        pass
 
 def start_health_check_server(port=10000):
-    server_address = ('', port)
-    httpd = HTTPServer(server_address, HealthCheckHandler)
-    logger.info(f"Servidor de Health Check iniciado en el puerto {port}")
-    httpd.serve_forever()
-
+    """Inicia el servidor de health check para Render"""
+    try:
+        server_address = ('', port)
+        httpd = HTTPServer(server_address, HealthCheckHandler)
+        logger.info(f"🌐 Servidor de Health Check iniciado en puerto {port}")
+        httpd.serve_forever()
+    except Exception as e:
+        logger.error(f"❌ Error en servidor de health check: {e}")
 
 async def initialize_bot():
     """Inicializa el bot: crea tablas, carga estados, etc."""
-    logger.info("Initializing bot components...")
+    logger.info("🔄 Inicializando componentes del bot...")
 
     # Crear conexión para las tablas de la base de datos
     conn = None
@@ -140,10 +197,10 @@ async def initialize_bot():
                 )
             """)
         conn.commit()
-        logger.info("Tablas de la base de datos verificadas/creadas.")
+        logger.info("✅ Tablas de la base de datos verificadas/creadas.")
 
     except Exception as e:
-        logger.error(f"Error durante la inicialización de la base de datos: {e}")
+        logger.error(f"❌ Error durante la inicialización de la base de datos: {e}")
         if conn:
             conn.rollback() # Asegúrate de hacer rollback en caso de error
     finally:
@@ -151,78 +208,110 @@ async def initialize_bot():
             conn.close()
 
     # Inicializar el sistema de juegos (carga datos de la DB)
-    initialize_games_system()
-    logger.info("Sistema de juegos inicializado.")
+    try:
+        initialize_games_system()
+        logger.info("✅ Sistema de juegos inicializado.")
+    except Exception as e:
+        logger.error(f"❌ Error inicializando sistema de juegos: {e}")
 
     # Iniciar el chequeo de juegos activos en segundo plano
-    # Importar juegos solo aquí si es necesario para evitar circular imports si juegos.py depende de bot.py
-    # Pero si initialize_games_system ya está importado, check_active_games debería estar bien.
-    import juegos # Importar juegos de nuevo para acceder a juegos.check_active_games()
-    asyncio.create_task(juegos.check_active_games())
-    logger.info("Tarea de chequeo de juegos activos programada.")
-
+    try:
+        import juegos
+        asyncio.create_task(juegos.check_active_games())
+        logger.info("✅ Tarea de chequeo de juegos activos programada.")
+    except Exception as e:
+        logger.error(f"❌ Error programando chequeo de juegos: {e}")
 
 def main() -> None:
+    """Función principal del bot"""
+    logger.info("🚀 Iniciando Puntum Bot...")
+    
     # Iniciar el servidor de health check en un hilo separado
     health_check_port = int(os.environ.get("PORT", 10000))
-    health_thread = threading.Thread(target=start_health_check_server, args=(health_check_port,))
+    health_thread = threading.Thread(
+        target=start_health_check_server, 
+        args=(health_check_port,),
+        daemon=True  # El hilo se cerrará cuando el programa principal termine
+    )
     health_thread.start()
-    logger.info(f"Servidor de Health Check iniciado en hilo separado en puerto {health_check_port}.")
+    logger.info(f"🌐 Servidor de Health Check iniciado en hilo separado en puerto {health_check_port}")
 
     # Construir la aplicación del bot
-    app = ApplicationBuilder.token(BOT_TOKEN).build()
+    try:
+        app = ApplicationBuilder.token(BOT_TOKEN).build()
+        logger.info("✅ Aplicación de Telegram creada exitosamente")
+    except Exception as e:
+        logger.error(f"❌ Error creando aplicación de Telegram: {e}")
+        exit(1)
 
     # ======= MANEJADORES DE COMANDOS =======
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("ranking", cmd_ranking))
-    app.add_handler(CommandHandler("miperfil", cmd_miperfil))
-    app.add_handler(CommandHandler("reto", cmd_reto))
+    try:
+        app.add_handler(CommandHandler("start", cmd_start))
+        app.add_handler(CommandHandler("help", cmd_help))
+        app.add_handler(CommandHandler("ranking", cmd_ranking))
+        app.add_handler(CommandHandler("miperfil", cmd_miperfil))
+        app.add_handler(CommandHandler("reto", cmd_reto))
 
-    # Comandos de juegos
-    app.add_handler(CommandHandler("cinematrivia", auth_required(cmd_cinematrivia)))
-    app.add_handler(CommandHandler("adivinapelicula", auth_required(cmd_adivinapelicula)))
-    app.add_handler(CommandHandler("emojipelicula", auth_required(cmd_emojipelicula)))
-    app.add_handler(CommandHandler("pista", auth_required(cmd_pista)))
-    app.add_handler(CommandHandler("rendirse", auth_required(cmd_rendirse)))
+        # Comandos de juegos
+        app.add_handler(CommandHandler("cinematrivia", auth_required(cmd_cinematrivia)))
+        app.add_handler(CommandHandler("adivinapelicula", auth_required(cmd_adivinapelicula)))
+        app.add_handler(CommandHandler("emojipelicula", auth_required(cmd_emojipelicula)))
+        app.add_handler(CommandHandler("pista", auth_required(cmd_pista)))
+        app.add_handler(CommandHandler("rendirse", auth_required(cmd_rendirse)))
 
-    # Comandos de autorización
-    app.add_handler(CommandHandler("solicitar", cmd_solicitar_autorizacion))
-    app.add_handler(CommandHandler("aprobar", cmd_aprobar_grupo))
-    app.add_handler(CommandHandler("solicitudes", cmd_ver_solicitudes))
-    app.add_handler(CommandHandler("statusauth", cmd_status_auth))
+        # Comandos de autorización
+        app.add_handler(CommandHandler("solicitar", cmd_solicitar_autorizacion))
+        app.add_handler(CommandHandler("aprobar", cmd_aprobar_grupo))
+        app.add_handler(CommandHandler("solicitudes", cmd_ver_solicitudes))
+        app.add_handler(CommandHandler("statusauth", cmd_status_auth))
 
-    # ======= MANEJADORES DE EVENTOS =======
-    # Callback queries (botones)
-    app.add_handler(CallbackQueryHandler(handle_trivia_callback))
+        # ======= MANEJADORES DE EVENTOS =======
+        # Callback queries (botones)
+        app.add_handler(CallbackQueryHandler(handle_trivia_callback))
 
-    # Mensajes de texto (hashtags y juegos)
-    app.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND, 
-        auth_required(route_text_message)
-    ))
+        # Mensajes de texto (hashtags y juegos)
+        app.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND, 
+            auth_required(route_text_message)
+        ))
+        
+        logger.info("✅ Todos los manejadores de comandos registrados")
+        
+    except Exception as e:
+        logger.error(f"❌ Error registrando manejadores: {e}")
+        exit(1)
 
     # ======= EJECUTAR BOT =======
-    logger.info("🚀 Iniciando bot...")
+    logger.info("🤖 Bot configurado, iniciando polling...")
     
-    # Inicializar bot de forma síncrona
     try:
-        # Para Render y entornos de producción
+        # Crear el loop de eventos de forma más robusta
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
         # Ejecutar la inicialización en el loop
         loop.run_until_complete(initialize_bot())
         
-        # Ejecutar bot
-        app.run_polling(poll_interval=1.0) # Añadir poll_interval para manejar la terminación gracefully
-    except RuntimeError as e:
-        logger.error(f"Error al iniciar el bucle de eventos principal: {e}")
-        # La lógica de fallback con asyncio.run o get_event_loop no es lo más robusto aquí.
-        # Es mejor asegurar que el BOT_TOKEN esté bien definido al inicio.
-        # Eliminamos la lógica de fallback para simplificar y enfocarnos en la causa raíz.
-        logger.error("No se pudo iniciar el bot. Verifica los logs para más detalles.")
-
+        logger.info("🎯 Iniciando polling del bot...")
+        # Ejecutar bot con configuración mejorada
+        app.run_polling(
+            poll_interval=1.0,  # Intervalo de polling
+            timeout=10,         # Timeout para requests
+            bootstrap_retries=-1, # Reintentos infinitos en bootstrap
+            read_timeout=30,    # Timeout de lectura
+            write_timeout=30,   # Timeout de escritura
+            connect_timeout=30  # Timeout de conexión
+        )
+        
+    except KeyboardInterrupt:
+        logger.info("🛑 Bot detenido por el usuario (Ctrl+C)")
+    except Exception as e:
+        logger.error(f"❌ Error crítico ejecutando el bot: {e}")
+        logger.error("💡 Verifica que:")
+        logger.error("   1. Tu BOT_TOKEN sea válido")
+        logger.error("   2. Tengas conexión a internet")
+        logger.error("   3. Todos los módulos estén instalados")
+        exit(1)
 
 if __name__ == "__main__":
     main()
