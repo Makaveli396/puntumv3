@@ -1,3 +1,4 @@
+# juegos.py
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, Application
 import logging
@@ -6,7 +7,9 @@ import random
 import time
 import asyncio
 import json
-from db import add_points, get_connection
+import telegram # Asegúrate de importar telegram para usar telegram.error.BadRequest
+
+from db import add_points, get_connection # Importar get_connection también
 from generador_trivia import generar_pregunta
 
 logger = logging.getLogger(__name__)
@@ -23,375 +26,353 @@ def save_active_games_to_db():
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("DELETE FROM active_games")
-        for chat_id, data in active_games.items():
-            cursor.execute(
-                "INSERT INTO active_games (chat_id, juego, respuesta, pistas, intentos, started_by, last_activity) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (
-                    chat_id,
-                    data.get('juego'),
-                    data.get('respuesta'),
-                    json.dumps(data.get('pistas', [])),
-                    data.get('intentos', 0),
-                    data.get('started_by'),
-                    data.get('last_activity')
+        # Para PostgreSQL, usa %s como marcador de posición
+        # Y asegúrate de que 'respuesta' esté en la definición de la tabla en db.py
+        if conn.info.dsn.startswith("host=") if hasattr(conn, 'info') else False: # Detectar PostgreSQL
+            cursor.execute("DELETE FROM active_games")
+            for chat_id, data in active_games.items():
+                cursor.execute(
+                    """INSERT INTO active_games (chat_id, juego, respuesta, pistas, intentos, started_by, last_activity)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                    (
+                        chat_id,
+                        data.get('juego'),
+                        data.get('respuesta'),
+                        json.dumps(data.get('pistas', [])),
+                        data.get('intentos', 0),
+                        data.get('started_by'),
+                        data.get('last_activity')
+                    )
                 )
-            )
 
-        cursor.execute("DELETE FROM active_trivias")
-        for chat_id, data in active_trivias.items():
-            cursor.execute(
-                "INSERT INTO active_trivias (chat_id, pregunta, respuesta, start_time, started_by) VALUES (%s, %s, %s, %s, %s)",
-                (
-                    chat_id,
-                    data.get('pregunta'),
-                    data.get('respuesta'),
-                    data.get('start_time'),
-                    data.get('started_by')
+            cursor.execute("DELETE FROM active_trivias")
+            for chat_id, data in active_trivias.items():
+                cursor.execute(
+                    """INSERT INTO active_trivias (chat_id, pregunta, respuesta, start_time, opciones, message_id, inline_keyboard_message_id)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                    (
+                        chat_id,
+                        data.get('pregunta'),
+                        data.get('respuesta'),
+                        data.get('start_time'),
+                        json.dumps(data.get('opciones', [])),
+                        data.get('message_id'),
+                        data.get('inline_keyboard_message_id')
+                    )
                 )
-            )
+        else: # SQLite
+            cursor.execute("DELETE FROM active_games")
+            for chat_id, data in active_games.items():
+                cursor.execute(
+                    """INSERT INTO active_games (chat_id, juego, respuesta, pistas, intentos, started_by, last_activity)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        chat_id,
+                        data.get('juego'),
+                        data.get('respuesta'),
+                        json.dumps(data.get('pistas', [])),
+                        data.get('intentos', 0),
+                        data.get('started_by'),
+                        data.get('last_activity')
+                    )
+                )
 
+            cursor.execute("DELETE FROM active_trivias")
+            for chat_id, data in active_trivias.items():
+                cursor.execute(
+                    """INSERT INTO active_trivias (chat_id, pregunta, respuesta, start_time, opciones, message_id, inline_keyboard_message_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        chat_id,
+                        data.get('pregunta'),
+                        data.get('respuesta'),
+                        data.get('start_time'),
+                        json.dumps(data.get('opciones', [])),
+                        data.get('message_id'),
+                        data.get('inline_keyboard_message_id')
+                    )
+                )
+        
         conn.commit()
-        conn.close()
-        logger.info("Juegos activos guardados en la BD")
     except Exception as e:
         logger.error(f"Error guardando juegos activos: {e}")
+    finally:
+        if conn:
+            conn.close()
 
 def load_active_games_from_db():
     try:
         conn = get_connection()
         cursor = conn.cursor()
+        global active_games, active_trivias
+        active_games = {}
+        active_trivias = {}
 
-        cursor.execute("SELECT chat_id, juego, respuesta, pistas, intentos, started_by, last_activity FROM active_games")
-        for row in cursor.fetchall():
-            active_games[row[0]] = {
-                'juego': row[1],
-                'respuesta': row[2],
-                'pistas': json.loads(row[3]) if row[3] else [],
-                'intentos': row[4],
-                'started_by': row[5],
-                'last_activity': row[6]
+        # Cargar juegos activos
+        if conn.info.dsn.startswith("host=") if hasattr(conn, 'info') else False: # Detectar PostgreSQL
+            cursor.execute("SELECT chat_id, juego, respuesta, pistas, intentos, started_by, last_activity FROM active_games")
+        else: # SQLite
+            cursor.execute("SELECT chat_id, juego, respuesta, pistas, intentos, started_by, last_activity FROM active_games")
+        
+        rows = cursor.fetchall()
+        for row in rows:
+            chat_id, juego, respuesta, pistas_json, intentos, started_by, last_activity = row
+            active_games[chat_id] = {
+                'juego': juego,
+                'respuesta': respuesta,
+                'pistas': json.loads(pistas_json) if pistas_json else [],
+                'intentos': intentos,
+                'started_by': started_by,
+                'last_activity': last_activity # PostgreSQL timestamp ya es un objeto datetime
             }
-
-        cursor.execute("SELECT chat_id, pregunta, respuesta, start_time, started_by FROM active_trivias")
-        for row in cursor.fetchall():
-            active_trivias[row[0]] = {
-                'pregunta': row[1],
-                'respuesta': row[2],
-                'start_time': row[3],
-                'started_by': row[4]
+            # Asegúrate de que last_activity se maneje correctamente si es un string en SQLite
+            if not (conn.info.dsn.startswith("host=") if hasattr(conn, 'info') else False) and isinstance(last_activity, str):
+                active_games[chat_id]['last_activity'] = datetime.strptime(last_activity, '%Y-%m-%d %H:%M:%S.%f')
+            
+        # Cargar trivias activas
+        if conn.info.dsn.startswith("host=") if hasattr(conn, 'info') else False: # Detectar PostgreSQL
+            cursor.execute("SELECT chat_id, pregunta, respuesta, start_time, opciones, message_id, inline_keyboard_message_id FROM active_trivias")
+        else: # SQLite
+            cursor.execute("SELECT chat_id, pregunta, respuesta, start_time, opciones, message_id, inline_keyboard_message_id FROM active_trivias")
+        
+        rows = cursor.fetchall()
+        for row in rows:
+            chat_id, pregunta, respuesta, start_time, opciones_json, message_id, inline_keyboard_message_id = row
+            active_trivias[chat_id] = {
+                'pregunta': pregunta,
+                'respuesta': respuesta,
+                'start_time': start_time,
+                'opciones': json.loads(opciones_json) if opciones_json else [],
+                'message_id': message_id,
+                'inline_keyboard_message_id': inline_keyboard_message_id
             }
-
-        conn.close()
-        logger.info("Juegos activos cargados desde la BD")
+        
     except Exception as e:
         logger.error(f"Error cargando juegos activos: {e}")
+    finally:
+        if conn:
+            conn.close()
 
-async def cleanup_games_periodically():
-    while True:
-        await asyncio.sleep(3600)
-        current_time = time.time()
+async def check_active_games():
+    """Función para revisar juegos activos y limpiar los inactivos."""
+    current_time = time.time()
+    games_to_remove = []
+    
+    for chat_id, game_data in active_games.items():
+        # Para PostgreSQL, last_activity es un objeto datetime, convertir a timestamp
+        last_activity_timestamp = game_data['last_activity'].timestamp() if isinstance(game_data['last_activity'], datetime) else game_data['last_activity']
+        
+        if current_time - last_activity_timestamp > 3600:  # 1 hora de inactividad
+            games_to_remove.append(chat_id)
 
-        for chat_id in list(active_games.keys()):
-            if current_time - active_games[chat_id].get('last_activity', 0) > 7200:
-                del active_games[chat_id]
-                logger.info(f"Juego inactivo eliminado en chat {chat_id}")
+    for chat_id in games_to_remove:
+        logger.info(f"Juego en chat {chat_id} removido por inactividad.")
+        del active_games[chat_id]
+    
+    # También revisa trivias activas
+    trivias_to_remove = []
+    for chat_id, trivia_data in active_trivias.items():
+        if current_time - trivia_data['start_time'] > 600: # 10 minutos para trivias
+            trivias_to_remove.append(chat_id)
+    
+    for chat_id in trivias_to_remove:
+        logger.info(f"Trivia en chat {chat_id} removida por inactividad.")
+        del active_trivias[chat_id]
+        # Opcional: intentar editar el mensaje para indicar que la trivia terminó
+        # if 'message_id' in trivia_data:
+        #     try:
+        #         await context.bot.edit_message_text(
+        #             chat_id=chat_id,
+        #             message_id=trivia_data['message_id'],
+        #             text="La trivia ha caducado por inactividad."
+        #         )
+        #     except Exception as e:
+        #         logger.warning(f"No se pudo editar el mensaje de trivia caducada: {e}")
 
-        for chat_id in list(active_trivias.keys()):
-            if current_time - active_trivias[chat_id].get('start_time', 0) > 7200:
-                del active_trivias[chat_id]
-                logger.info(f"Trivia inactiva eliminada en chat {chat_id}")
+    if games_to_remove or trivias_to_remove:
+        save_active_games_to_db() # Guarda los cambios si se eliminaron juegos/trivias
+    
+    # Programar la próxima revisión
+    await asyncio.sleep(600)  # Revisa cada 10 minutos
+    await check_active_games()
 
-        save_active_games_to_db()
 
 async def cmd_cinematrivia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
-    user = update.effective_user
-
-    if chat_id in active_trivias:
-        await update.message.reply_text("¡Ya hay una trivia activa en este chat!")
-        return
-
-    try:
-        pregunta, respuesta = generar_pregunta()
-        if not pregunta or not respuesta:
-            await update.message.reply_text("❌ No se pudo generar la pregunta. Intenta más tarde.")
-            return
-
-        active_trivias[chat_id] = {
-            'pregunta': pregunta,
-            'respuesta': respuesta,
-            'start_time': time.time(),
-            'started_by': user.id
-        }
-
-        save_active_games_to_db()
-
-        # Crear botones para respuestas múltiples (opcional)
-        keyboard = [
-            [InlineKeyboardButton("Responder por texto", callback_data="text_answer")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await update.message.reply_text(
-            f"🎬 TRIVIA CINEMATOGRÁFICA 🍿\n\n{pregunta}\n\nTienes 60 segundos para responder. ¡Buena suerte!",
-            reply_markup=reply_markup
-        )
-
-        await asyncio.sleep(60)
-        if chat_id in active_trivias:
-            respuesta_correcta = active_trivias[chat_id]['respuesta']
-            del active_trivias[chat_id]
-            save_active_games_to_db()
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"⌛ ¡Tiempo agotado! La respuesta correcta era: {respuesta_correcta}"
-            )
-
-    except Exception as e:
-        logger.error(f"Error en trivia: {e}")
-        await update.message.reply_text("Ocurrió un error al generar la trivia. Intenta más tarde.")
-
-async def cmd_adivinapelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = update.effective_chat.id
-    user = update.effective_user
+    user_id = update.effective_user.id
 
     if chat_id in active_games:
-        await update.message.reply_text("¡Ya hay un juego activo en este chat!")
+        await update.message.reply_text("Ya hay un juego activo en este chat. Usa /rendirse para terminarlo.")
         return
 
-    peliculas = [
-        ("El Padrino", ["película de mafia de 1972 dirigida por Francis Ford Coppola", "protagonizada por Marlon Brando", "es considerada una de las mejores películas de la historia"]),
-        ("Titanic", ["película romántica de 1997 sobre un barco que se hunde", "dirigida por James Cameron", "protagonizada por Leonardo DiCaprio y Kate Winslet"]),
-        ("Star Wars", ["película de ciencia ficción con jedis y sables de luz", "creada por George Lucas", "la saga comenzó en 1977"]),
-        ("El Señor de los Anillos", ["trilogía de fantasía con hobbits y un anillo", "basada en la obra de J.R.R. Tolkien", "dirigida por Peter Jackson"])
-    ]
+    logger.info(f"Generando pregunta de cinematrivia para chat {chat_id}")
+    pregunta, respuesta = generar_pregunta()
 
-    pelicula, todas_las_pistas = random.choice(peliculas)
-    active_games[chat_id] = {
-        'juego': 'adivinapelicula',
-        'respuesta': pelicula,
-        'pistas': todas_las_pistas,
-        'pistas_dadas': 0,
-        'intentos': 0,
-        'started_by': user.id,
-        'last_activity': time.time()
-    }
-
-    save_active_games_to_db()
-
-    await update.message.reply_text(
-        f"🎬 ADIVINA LA PELÍCULA 🍿\n\nEstoy pensando en una película...\n"
-        f"Pista 1: {todas_las_pistas[0]}\n\n"
-        f"Responde con el título de la película. ¡Tienes 5 intentos!\n"
-        f"Usa /pista para obtener más pistas o /rendirse para terminar el juego."
-    )
-
-async def cmd_emojipelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = update.effective_chat.id
-    user = update.effective_user
-
-    if chat_id in active_games:
-        await update.message.reply_text("¡Ya hay un juego activo en este chat!")
+    if not pregunta or not respuesta or respuesta == "Error":
+        await update.message.reply_text("❌ No se pudo generar la pregunta. Intenta más tarde.")
+        logger.error(f"Fallo al generar pregunta de trivia para chat {chat_id}: Pregunta='{pregunta}', Respuesta='{respuesta}'")
         return
 
-    emoji_peliculas = {
-        "🦁👑": "El Rey León", 
-        "👽📞": "E.T.", 
-        "👻🚫": "Cazafantasmas",
-        "🦈🎶": "Tiburón", 
-        "🧙‍♂️⚡": "Harry Potter", 
-        "🧛‍♂️💍": "El Señor de los Anillos",
-        "🚀👨‍🚀": "Apollo 13", 
-        "🦸‍♂️🦇": "Batman", 
-        "👩‍🚀🌌": "Interstellar",
-        "🐟🔍": "Buscando a Nemo",
-        "🏰👸": "La Bella y la Bestia",
-        "🦖🌴": "Jurassic Park"
-    }
-
-    emojis, respuesta = random.choice(list(emoji_peliculas.items()))
     active_games[chat_id] = {
-        'juego': 'emojipelicula',
-        'respuesta': respuesta,
-        'emojis': emojis,
+        'juego': 'cinematrivia',
+        'respuesta': respuesta.lower(),  # Convertir a minúsculas para comparación sin distinción de mayúsculas
         'pistas': [],
         'intentos': 0,
-        'started_by': user.id,
-        'last_activity': time.time()
+        'started_by': user_id,
+        'last_activity': datetime.now() # Usar datetime.now() para PostgreSQL y SQLite
     }
-
     save_active_games_to_db()
 
+    keyboard = [[InlineKeyboardButton("Responder por texto", callback_data="text_answer")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
-        f"🎬 ADIVINA LA PELÍCULA POR EMOJIS 🍿\n\n"
-        f"¿Qué película es esta? {emojis}\n\n"
-        f"Responde con el título exacto de la película. ¡Tienes 5 intentos!\n"
-        f"Usa /rendirse si quieres terminar el juego."
+        f"🎬 **¡Nueva Cinematrivia!** 🍿\n\n{pregunta}\n\n"
+        "🤔 ¡Adivina la respuesta! Tienes 5 intentos.",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
     )
 
-# ======= FUNCIONES FALTANTES =======
+async def cmd_adivinapelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("Comando /adivinapelicula aún no implementado.")
+
+async def cmd_emojipelicula(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("Comando /emojipelicula aún no implementado.")
 
 async def cmd_pista(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Comando para obtener pistas adicionales en juegos activos"""
     chat_id = update.effective_chat.id
-    user = update.effective_user
-
+    
     if chat_id not in active_games:
-        await update.message.reply_text("❌ No hay ningún juego activo en este chat.")
+        await update.message.reply_text("No hay ningún juego activo en este chat para dar una pista.")
         return
 
     game_data = active_games[chat_id]
+    if game_data['juego'] != 'cinematrivia':
+        await update.message.reply_text("Las pistas solo están disponibles para Cinematrivia en este momento.")
+        return
     
-    if game_data['juego'] == 'adivinapelicula':
-        pistas_disponibles = game_data.get('pistas', [])
-        pistas_dadas = game_data.get('pistas_dadas', 0)
-        
-        if pistas_dadas >= len(pistas_disponibles):
-            await update.message.reply_text("❌ Ya se han dado todas las pistas disponibles.")
-            return
-        
-        # Dar la siguiente pista
-        siguiente_pista = pistas_disponibles[pistas_dadas]
-        game_data['pistas_dadas'] = pistas_dadas + 1
-        game_data['last_activity'] = time.time()
-        
-        save_active_games_to_db()
-        
-        await update.message.reply_text(
-            f"💡 PISTA {pistas_dadas + 2}: {siguiente_pista}\n\n"
-            f"Pistas restantes: {len(pistas_disponibles) - pistas_dadas - 1}"
-        )
+    # Lógica para dar una pista (ej. revelar una letra)
+    respuesta = game_data['respuesta']
+    pistas = game_data.get('pistas', [])
     
-    elif game_data['juego'] == 'emojipelicula':
-        await update.message.reply_text(
-            "❌ En el juego de emojis no hay pistas adicionales. "
-            "¡Los emojis ya son la pista principal!"
-        )
-    
-    else:
-        await update.message.reply_text("❌ Este juego no admite pistas adicionales.")
-
-async def cmd_rendirse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Comando para rendirse en un juego activo"""
-    chat_id = update.effective_chat.id
-    user = update.effective_user
-
-    if chat_id not in active_games and chat_id not in active_trivias:
-        await update.message.reply_text("❌ No hay ningún juego activo en este chat.")
+    if len(pistas) >= len(respuesta) / 2: # Límite de pistas
+        await update.message.reply_text("Ya he dado suficientes pistas. ¡Esfuérzate un poco más!")
         return
 
-    # Manejar rendición en juegos regulares
-    if chat_id in active_games:
-        game_data = active_games[chat_id]
-        respuesta_correcta = game_data['respuesta']
-        tipo_juego = game_data['juego']
-        
-        del active_games[chat_id]
-        save_active_games_to_db()
-        
-        mensaje = f"🏳️ ¡Te has rendido!\n\n"
-        if tipo_juego == 'adivinapelicula':
-            mensaje += f"La película era: **{respuesta_correcta}**"
-        elif tipo_juego == 'emojipelicula':
-            emojis = game_data.get('emojis', '')
-            mensaje += f"La película {emojis} era: **{respuesta_correcta}**"
-        
-        await update.message.reply_text(mensaje)
+    # Generar una nueva pista
+    letras_reveladas = [c if c in pistas else '_' for c in respuesta]
+    
+    # Encontrar una letra no revelada para dar una pista
+    posiciones_no_reveladas = [i for i, char in enumerate(respuesta) if char not in pistas and char.isalpha()]
 
-    # Manejar rendición en trivias
-    elif chat_id in active_trivias:
-        trivia_data = active_trivias[chat_id]
-        respuesta_correcta = trivia_data['respuesta']
-        
-        del active_trivias[chat_id]
+    if not posiciones_no_reveladas:
+        await update.message.reply_text("No hay más letras para revelar como pista.")
+        return
+    
+    pista_char = random.choice(posiciones_no_reveladas)
+    pistas.append(respuesta[pista_char])
+    active_games[chat_id]['pistas'] = pistas
+    save_active_games_to_db()
+    
+    letras_reveladas = [c if c in pistas else '_' for c in respuesta]
+    pista_actual = " ".join(letras_reveladas)
+
+    await update.message.reply_text(f"Aquí tienes una pista: `{pista_actual}`", parse_mode='Markdown')
+
+
+async def cmd_rendirse(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+
+    if chat_id in active_games:
+        game_data = active_games.pop(chat_id)
         save_active_games_to_db()
-        
-        await update.message.reply_text(
-            f"🏳️ ¡Te has rendido en la trivia!\n\n"
-            f"La respuesta correcta era: **{respuesta_correcta}**"
-        )
+        respuesta_correcta = game_data.get('respuesta', 'N/A')
+        await update.message.reply_text(f"Has abandonado el juego actual. La respuesta era: **{respuesta_correcta}**", parse_mode='Markdown')
+    elif chat_id in active_trivias:
+        trivia_data = active_trivias.pop(chat_id)
+        save_active_games_to_db()
+        respuesta_correcta = trivia_data.get('respuesta', 'N/A')
+        await update.message.reply_text(f"Has abandonado la trivia actual. La respuesta era: **{respuesta_correcta}**", parse_mode='Markdown')
+    else:
+        await update.message.reply_text("No hay ningún juego o trivia activa en este chat.")
+
+
+async def route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ruta los mensajes de texto a los manejadores de juego o hashtags."""
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    text = update.message.text
+
+    # Primero, verificar si hay un juego activo y si es una respuesta
+    if chat_id in active_games and user_id != context.bot.id: # Asegurarse de que el bot no se responda a sí mismo
+        game_data = active_games[chat_id]
+        if game_data['juego'] == 'cinematrivia':
+            await handle_game_message(update, context)
+            return
+    
+    # Si no es una respuesta de juego, procesar hashtags
+    await handle_hashtags(update, context)
+
 
 async def handle_game_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Manejar mensajes de texto cuando hay juegos activos"""
     chat_id = update.effective_chat.id
-    user = update.effective_user
-    mensaje = update.message.text.strip().lower()
+    user_id = update.effective_user.id
+    user_answer = update.message.text.lower().strip() # Convertir a minúsculas y quitar espacios
+    
+    if chat_id not in active_games:
+        return # No hay juego activo para este chat
 
-    # Manejar respuestas de trivia
-    if chat_id in active_trivias:
-        trivia_data = active_trivias[chat_id]
-        respuesta_correcta = trivia_data['respuesta'].lower()
-        
-        if mensaje == respuesta_correcta:
-            del active_trivias[chat_id]
-            save_active_games_to_db()
-            
-            # Dar puntos al usuario
-            add_points(user.id, user.first_name, 10)
-            
-            await update.message.reply_text(
-                f"🎉 ¡CORRECTO! 🎉\n\n"
-                f"La respuesta era: **{trivia_data['respuesta']}**\n"
-                f"¡Has ganado 10 puntos! 🌟"
-            )
-            return
-        else:
-            await update.message.reply_text("❌ Respuesta incorrecta. ¡Sigue intentando!")
-            return
+    game_data = active_games[chat_id]
+    game_data['last_activity'] = datetime.now() # Actualizar actividad
+    
+    if game_data['juego'] == 'cinematrivia':
+        correct_answer = game_data['respuesta'].lower().strip()
 
-    # Manejar respuestas de juegos regulares
-    if chat_id in active_games:
-        game_data = active_games[chat_id]
-        respuesta_correcta = game_data['respuesta'].lower()
-        
-        # Incrementar intentos
-        game_data['intentos'] += 1
-        game_data['last_activity'] = time.time()
-        
-        # Verificar respuesta
-        if mensaje == respuesta_correcta:
-            puntos = max(15 - game_data['intentos'] * 2, 5)  # Más puntos con menos intentos
-            
-            del active_games[chat_id]
+        if user_answer == correct_answer:
+            add_points(user_id, chat_id, 10, update.effective_user.username, update.effective_chat.title, "Cinematrivia Correcta", update.message.message_id)
+            del active_games[chat_id] # Eliminar juego activo
             save_active_games_to_db()
-            
-            # Dar puntos al usuario
-            add_points(user.id, user.first_name, puntos)
-            
-            mensaje_victoria = f"🎉 ¡CORRECTO! 🎉\n\n"
-            mensaje_victoria += f"La respuesta era: **{game_data['respuesta']}**\n"
-            mensaje_victoria += f"Intentos usados: {game_data['intentos']}\n"
-            mensaje_victoria += f"¡Has ganado {puntos} puntos! 🌟"
-            
-            await update.message.reply_text(mensaje_victoria)
-            return
-        
-        # Respuesta incorrecta
-        intentos_restantes = 5 - game_data['intentos']
-        
-        if intentos_restantes <= 0:
-            # Se acabaron los intentos
-            respuesta_real = game_data['respuesta']
-            del active_games[chat_id]
-            save_active_games_to_db()
-            
             await update.message.reply_text(
-                f"❌ ¡Se acabaron los intentos!\n\n"
-                f"La respuesta correcta era: **{respuesta_real}**\n"
-                f"¡Mejor suerte la próxima vez! 🍀"
+                f"🎉 **¡Correcto!** 🎉\n\n"
+                f"¡Felicidades, {update.effective_user.mention_html()}! Has adivinado la película: **{correct_answer.title()}**\n"
+                "Has ganado 10 puntos. 🌟",
+                parse_mode='HTML'
             )
         else:
-            save_active_games_to_db()
-            await update.message.reply_text(
-                f"❌ Respuesta incorrecta.\n"
-                f"Te quedan {intentos_restantes} intentos. ¡Sigue intentando!"
-            )
+            game_data['intentos'] += 1
+            # Lógica para respuesta incorrecta
+            intentos_restantes = 5 - game_data['intentos']
+            
+            if intentos_restantes <= 0:
+                # Se acabaron los intentos
+                respuesta_real = game_data['respuesta']
+                del active_games[chat_id]
+                save_active_games_to_db()
+                
+                await update.message.reply_text(
+                    f"❌ ¡Se acabaron los intentos!\\n\\n"\
+                    f"La respuesta correcta era: **{respuesta_real.title()}**\\n"\
+                    f"¡Mejor suerte la próxima vez! 🍀",
+                    parse_mode='Markdown'
+                )
+            else:
+                save_active_games_to_db()
+                await update.message.reply_text(
+                    f"❌ Respuesta incorrecta.\\n"\
+                    f"Te quedan {intentos_restantes} intentos. ¡Sigue intentando!"
+                )
 
 async def handle_trivia_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Manejar callbacks de botones en trivias"""
     query = update.callback_query
-    await query.answer()
+    
+    try:
+        await query.answer() # Intenta responder al callback
+    except telegram.error.BadRequest as e:
+        logger.warning(f"Error al responder al callback query (quizás ya caducó): {e}")
+        # Puedes optar por no hacer nada, o enviar un mensaje al usuario indicando que la interacción caducó
+        # await query.edit_message_text("Esta interacción ha caducado. Por favor, inicia una nueva trivia.")
+        return # Salir si el callback ya caducó
     
     if query.data == "text_answer":
         await query.edit_message_text(
@@ -408,7 +389,7 @@ __all__ = [
     "handle_game_message",
     "handle_trivia_callback",
     "initialize_games_system",
-    "cleanup_games_periodically",
     "active_games",
-    "active_trivias"
+    "active_trivias",
+    "route_text_message" # Asegúrate de que este también esté exportado para que bot.py lo use
 ]
