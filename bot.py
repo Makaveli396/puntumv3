@@ -224,7 +224,7 @@ def main() -> None:
     # Construir la aplicación del bot
     try:
         logger.info(f"🔧 Creando ApplicationBuilder con token de longitud {len(BOT_TOKEN)}")
-        app = ApplicationBuilder.token(BOT_TOKEN).build()
+        app = ApplicationBuilder().token(BOT_TOKEN).build()
         logger.info("✅ Aplicación de Telegram creada exitosamente")
     except Exception as e:
         logger.error(f"❌ Error creando aplicación de Telegram: {e}")
