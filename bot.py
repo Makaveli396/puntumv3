@@ -1,3 +1,4 @@
+# bot.py
 #!/usr/bin/env python3
 
 import os
@@ -38,7 +39,8 @@ from juegos import (
     handle_trivia_callback,
     initialize_games_system,
     active_games,
-    active_trivias
+    active_trivias,
+    route_text_message # Asegúrate de que este también esté exportado
 )
 
 # Importar sistema de autorización
@@ -51,152 +53,130 @@ from sistema_autorizacion import (
     cmd_status_auth
 )
 
+# Importar funciones de db.py
+from db import (
+    create_games_tables, # Cambiado de create_tables
+    create_auth_tables,
+    create_user_tables,
+    get_connection # Necesario para la inicialización
+)
+from db import get_configured_chats, save_chat_config, get_chat_config # Importar configuración de chats
+
 # Importar configuración
 try:
     from config import Config
     BOT_TOKEN = Config.BOT_TOKEN
+    ADMIN_USER_ID = Config.ADMIN_USER_ID
 except (ImportError, AttributeError):
     BOT_TOKEN = os.environ.get("BOT_TOKEN")
+    ADMIN_USER_ID = os.environ.get("ADMIN_USER_ID")
     if not BOT_TOKEN:
         print("❌ Error: BOT_TOKEN no está definido.")
         exit()
+    if not ADMIN_USER_ID:
+        print("❌ Advertencia: ADMIN_USER_ID no está definido. Algunas funciones de administración podrían no estar disponibles.")
 
-# Servidor HTTP simple para Render
-# ... (código anterior)
+# Configurar logging
+import logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
+# Clase de servidor HTTP para mantener el servicio activo en Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == '/health':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b'Bot is running!')
-        elif self.path == '/':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html; charset=utf-8') # Añade charset=utf-8
-            self.end_headers()
-            
-            # Codifica el string a bytes usando UTF-8
-            html_content = """
-            <!DOCTYPE html>
-            <html>
-            <head><title>Cinema Bot</title></head>
-            <body>
-                <h1>🎬 Cinema Bot está activo! 🍿</h1>
-                <p>Bot de Telegram funcionando correctamente.</p>
-            </body>
-            </html>
-            """
-            self.wfile.write(html_content.encode('utf-8')) # .encode('utf-8') aquí
-        else:
-            self.send_response(404)
-            self.end_headers()
-    
-    def log_message(self, format, *args):
-        # Suprimir logs del servidor HTTP
-        pass
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b"Bot is running!")
 
-# ... (resto del código)
+def start_health_check_server(port=10000):
+    server_address = ('', port)
+    httpd = HTTPServer(server_address, HealthCheckHandler)
+    logger.info(f"Servidor de Health Check iniciado en el puerto {port}")
+    httpd.serve_forever()
 
-def start_health_server():
-    """Inicia servidor HTTP para health checks"""
-    port = int(os.environ.get('PORT', 10000))
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    print(f"🌐 Servidor HTTP iniciado en puerto {port}")
-    server.serve_forever()
-
-async def route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Enrutar mensajes de texto según el contexto"""
-    chat_id = update.effective_chat.id
-    
-    # Si hay juegos activos, manejar primero
-    if chat_id in active_games or chat_id in active_trivias:
-        await handle_game_message(update, context)
-    else:
-        # Si no hay juegos, procesar hashtags
-        await handle_hashtags(update, context)
-
-def create_games_tables():
-    """Crear tablas específicas para juegos"""
-    try:
-        from db import get_connection
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Tabla de juegos activos
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS active_games (
-                chat_id BIGINT PRIMARY KEY,
-                juego VARCHAR(50),
-                respuesta TEXT,
-                pistas TEXT,
-                intentos INTEGER DEFAULT 0,
-                started_by BIGINT,
-                last_activity FLOAT
-            )
-        """)
-        
-        # Tabla de trivias activas
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS active_trivias (
-                chat_id BIGINT PRIMARY KEY,
-                pregunta TEXT,
-                respuesta TEXT,
-                start_time FLOAT,
-                started_by BIGINT
-            )
-        """)
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        print("✅ Tablas de juegos creadas")
-        
-    except Exception as e:
-        print(f"❌ Error creando tablas de juegos: {e}")
 
 async def initialize_bot():
-    """Función para inicializar el bot"""
-    print("🔧 Creando tablas de base de datos...")
-    from db import create_tables
-    create_tables()
-    
-    print("🎮 Creando tablas de juegos...")
-    create_games_tables()
-    
-    print("🔐 Creando tablas de autorización...")
-    create_auth_tables()
-    
-    print("🎮 Inicializando sistema de juegos...")
+    """Inicializa el bot: crea tablas, carga estados, etc."""
+    logger.info("Initializing bot components...")
+
+    # Crear conexión para las tablas de la base de datos
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Crear todas las tablas necesarias
+        create_auth_tables(conn, cursor) # Llama a la función individual
+        create_user_tables(conn, cursor) # Llama a la función individual
+        create_games_tables(conn, cursor) # Llama a la función individual
+        
+        # También crear la tabla de chat_config si no existe
+        if os.environ.get('DATABASE_URL'): # PostgreSQL
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_config (
+                    chat_id BIGINT PRIMARY KEY,
+                    chat_name TEXT,
+                    rankings_enabled BOOLEAN DEFAULT TRUE,
+                    challenges_enabled BOOLEAN DEFAULT TRUE
+                )
+            """)
+        else: # SQLite
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS chat_config (
+                    chat_id INTEGER PRIMARY KEY,
+                    chat_name TEXT,
+                    rankings_enabled INTEGER DEFAULT 1,
+                    challenges_enabled INTEGER DEFAULT 1
+                )
+            """)
+        conn.commit()
+        logger.info("Tablas de la base de datos verificadas/creadas.")
+
+    except Exception as e:
+        logger.error(f"Error durante la inicialización de la base de datos: {e}")
+        if conn:
+            conn.rollback() # Asegúrate de hacer rollback en caso de error
+    finally:
+        if conn:
+            conn.close()
+
+    # Inicializar el sistema de juegos (carga datos de la DB)
     initialize_games_system()
-    
-    print("🤖 Bot listo para recibir comandos.")
+    logger.info("Sistema de juegos inicializado.")
 
-def main():
-    """Función principal del bot"""
-    # Iniciar servidor HTTP en thread separado (para Render)
-    print("🚀 Iniciando servidor HTTP...")
-    http_thread = threading.Thread(target=start_health_server, daemon=True)
-    http_thread.start()
-    
-    # Crear aplicación
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # Iniciar el chequeo de juegos activos en segundo plano
+    asyncio.create_task(juegos.check_active_games())
+    logger.info("Tarea de chequeo de juegos activos programada.")
 
-    # ======= COMANDOS BÁSICOS =======
-    app.add_handler(CommandHandler("start", auth_required(cmd_start)))
-    app.add_handler(CommandHandler("help", auth_required(cmd_help)))
-    app.add_handler(CommandHandler("ranking", auth_required(cmd_ranking)))
-    app.add_handler(CommandHandler("miperfil", auth_required(cmd_miperfil)))
-    app.add_handler(CommandHandler("reto", auth_required(cmd_reto)))
 
-    # ======= COMANDOS DE JUEGOS =======
+def main() -> None:
+    # Iniciar el servidor de health check en un hilo separado
+    health_check_port = int(os.environ.get("PORT", 10000))
+    health_thread = threading.Thread(target=start_health_check_server, args=(health_check_port,))
+    health_thread.start()
+    logger.info(f"Servidor de Health Check iniciado en hilo separado en puerto {health_check_port}.")
+
+    # Construir la aplicación del bot
+    app = ApplicationBuilder.token(BOT_TOKEN).build()
+
+    # ======= MANEJADORES DE COMANDOS =======
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("ranking", cmd_ranking))
+    app.add_handler(CommandHandler("miperfil", cmd_miperfil))
+    app.add_handler(CommandHandler("reto", cmd_reto))
+
+    # Comandos de juegos
     app.add_handler(CommandHandler("cinematrivia", auth_required(cmd_cinematrivia)))
     app.add_handler(CommandHandler("adivinapelicula", auth_required(cmd_adivinapelicula)))
     app.add_handler(CommandHandler("emojipelicula", auth_required(cmd_emojipelicula)))
     app.add_handler(CommandHandler("pista", auth_required(cmd_pista)))
     app.add_handler(CommandHandler("rendirse", auth_required(cmd_rendirse)))
 
-    # ======= COMANDOS DE AUTORIZACIÓN =======
+    # Comandos de autorización
     app.add_handler(CommandHandler("solicitar", cmd_solicitar_autorizacion))
     app.add_handler(CommandHandler("aprobar", cmd_aprobar_grupo))
     app.add_handler(CommandHandler("solicitudes", cmd_ver_solicitudes))
@@ -220,24 +200,28 @@ def main():
         # Para Render y entornos de producción
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        
+        # Ejecutar la inicialización en el loop
         loop.run_until_complete(initialize_bot())
         
         # Ejecutar bot
         app.run_polling()
-    except RuntimeError:
-        # Alternativa para entornos locales
+    except RuntimeError as e:
+        logger.error(f"Error al iniciar el bucle de eventos principal: {e}")
+        # Alternativa para entornos locales (si ya hay un loop corriendo, intentar con get_event_loop)
         try:
-            asyncio.run(initialize_bot())
-        except RuntimeError:
-            # Si ya hay un loop corriendo
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Crear una nueva tarea
-                task = asyncio.create_task(initialize_bot())
-                loop.run_until_complete(task)
+            current_loop = asyncio.get_event_loop()
+            if current_loop.is_running():
+                # Si ya hay un loop, schedule initialize_bot como una tarea
+                asyncio.create_task(initialize_bot())
             else:
-                loop.run_until_complete(initialize_bot())
-        app.run_polling()
+                # Si no hay un loop, pero RuntimeError fue por otra razón
+                current_loop.run_until_complete(initialize_bot())
+            app.run_polling()
+        except Exception as inner_e:
+            logger.error(f"Fallo en la alternativa de inicialización: {inner_e}")
+            print("❌ No se pudo iniciar el bot. Verifica los logs para más detalles.")
+
 
 if __name__ == "__main__":
     main()
