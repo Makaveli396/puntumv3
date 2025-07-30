@@ -26,7 +26,7 @@ def save_active_games_to_db():
         cursor.execute("DELETE FROM active_games")
         for chat_id, data in active_games.items():
             cursor.execute(
-                "INSERT INTO active_games (chat_id, juego, respuesta, pistas, intentos, started_by, last_activity) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO active_games (chat_id, juego, respuesta, pistas, intentos, started_by, last_activity) VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 (
                     chat_id,
                     data.get('juego'),
@@ -41,7 +41,7 @@ def save_active_games_to_db():
         cursor.execute("DELETE FROM active_trivias")
         for chat_id, data in active_trivias.items():
             cursor.execute(
-                "INSERT INTO active_trivias (chat_id, pregunta, respuesta, start_time, started_by) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO active_trivias (chat_id, pregunta, respuesta, start_time, started_by) VALUES (%s, %s, %s, %s, %s)",
                 (
                     chat_id,
                     data.get('pregunta'),
@@ -62,18 +62,18 @@ def load_active_games_from_db():
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT * FROM active_games")
+        cursor.execute("SELECT chat_id, juego, respuesta, pistas, intentos, started_by, last_activity FROM active_games")
         for row in cursor.fetchall():
             active_games[row[0]] = {
                 'juego': row[1],
                 'respuesta': row[2],
-                'pistas': json.loads(row[3]),
+                'pistas': json.loads(row[3]) if row[3] else [],
                 'intentos': row[4],
                 'started_by': row[5],
                 'last_activity': row[6]
             }
 
-        cursor.execute("SELECT * FROM active_trivias")
+        cursor.execute("SELECT chat_id, pregunta, respuesta, start_time, started_by FROM active_trivias")
         for row in cursor.fetchall():
             active_trivias[row[0]] = {
                 'pregunta': row[1],
