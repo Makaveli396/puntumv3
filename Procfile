@@ -1,1 +1,1 @@
-web: python bot.py
+web: python3 resolver_conflicto.py && python3 bot.py
