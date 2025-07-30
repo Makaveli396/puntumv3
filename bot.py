@@ -74,19 +74,28 @@ def load_config():
     """Carga la configuración del bot desde archivo o variables de entorno"""
     bot_token = None
     admin_user_id = None
+    config_source = "variables de entorno"
     
     # Intentar cargar desde config.py primero
     try:
         from config import Config
-        bot_token = getattr(Config, 'BOT_TOKEN', None)
-        admin_user_id = getattr(Config, 'ADMIN_USER_ID', None)
-        logger.info("✅ Configuración cargada desde config.py")
+        config_bot_token = getattr(Config, 'BOT_TOKEN', None)
+        config_admin_id = getattr(Config, 'ADMIN_USER_ID', None)
+        
+        if config_bot_token:  # Solo usar si realmente tiene un valor
+            bot_token = config_bot_token
+            config_source = "config.py"
+        if config_admin_id:
+            admin_user_id = config_admin_id
+            
+        logger.info("✅ Archivo config.py encontrado")
     except (ImportError, AttributeError) as e:
         logger.info("📁 No se encontró config.py, usando variables de entorno")
     
     # Si no se encuentra en config.py, usar variables de entorno
     if not bot_token:
         bot_token = os.environ.get("BOT_TOKEN")
+        config_source = "variables de entorno"
     
     if not admin_user_id:
         admin_user_id = os.environ.get("ADMIN_USER_ID")
@@ -95,14 +104,16 @@ def load_config():
     if not bot_token or bot_token.strip() == "":
         logger.error("❌ Error crítico: BOT_TOKEN no está definido o está vacío.")
         logger.error("💡 Soluciones:")
-        logger.error("   1. Crea un archivo config.py con: class Config: BOT_TOKEN = 'tu_token_aqui'")
-        logger.error("   2. O configura la variable de entorno BOT_TOKEN")
+        logger.error("   1. Configura la variable de entorno BOT_TOKEN en Render")
+        logger.error("   2. O modifica config.py para incluir directamente: BOT_TOKEN = 'tu_token_aqui'")
+        logger.error(f"🔍 Fuente de configuración: {config_source}")
         exit(1)
     
     # Validar formato del token (básico)
     if not bot_token.count(':') == 1 or len(bot_token) < 30:
         logger.error("❌ Error: BOT_TOKEN no tiene el formato correcto de Telegram")
         logger.error("💡 El token debe tener el formato: 123456789:ABCdefGHIjklMNOpqrSTUvwxyz")
+        logger.error(f"🔍 Token recibido (primeros 20 chars): '{bot_token[:20]}...'")
         exit(1)
     
     # Convertir ADMIN_USER_ID a int si existe
@@ -116,7 +127,7 @@ def load_config():
     if not admin_user_id:
         logger.warning("⚠️ ADMIN_USER_ID no está definido. Algunas funciones de administración no estarán disponibles.")
     
-    logger.info(f"✅ BOT_TOKEN cargado (longitud: {len(bot_token)})")
+    logger.info(f"✅ BOT_TOKEN cargado desde {config_source} (longitud: {len(bot_token)})")
     if admin_user_id:
         logger.info(f"✅ ADMIN_USER_ID configurado: {admin_user_id}")
     
