@@ -45,7 +45,6 @@ from juegos import (
 
 # Importar sistema de autorización
 from sistema_autorizacion import (
-    create_auth_tables,
     auth_required,
     cmd_solicitar_autorizacion,
     cmd_aprobar_grupo,
@@ -55,7 +54,7 @@ from sistema_autorizacion import (
 
 # Importar funciones de db.py
 from db import (
-    create_games_tables, # Cambiado de create_tables
+    create_games_tables,
     create_auth_tables,
     create_user_tables,
     get_connection # Necesario para la inicialización
@@ -142,46 +141,15 @@ async def initialize_bot():
     """Inicializa el bot: crea tablas, carga estados, etc."""
     logger.info("🔄 Inicializando componentes del bot...")
 
-    # Crear conexión para las tablas de la base de datos
-    conn = None
+    # Crear todas las tablas necesarias (cada función maneja su propia conexión)
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        # Crear todas las tablas necesarias
-        create_auth_tables(conn, cursor) # Llama a la función individual
-        create_user_tables(conn, cursor) # Llama a la función individual
-        create_games_tables(conn, cursor) # Llama a la función individual
-        
-        # También crear la tabla de chat_config si no existe
-        if os.environ.get('DATABASE_URL'): # PostgreSQL
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS chat_config (
-                    chat_id BIGINT PRIMARY KEY,
-                    chat_name TEXT,
-                    rankings_enabled BOOLEAN DEFAULT TRUE,
-                    challenges_enabled BOOLEAN DEFAULT TRUE
-                )
-            """)
-        else: # SQLite
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS chat_config (
-                    chat_id INTEGER PRIMARY KEY,
-                    chat_name TEXT,
-                    rankings_enabled INTEGER DEFAULT 1,
-                    challenges_enabled INTEGER DEFAULT 1
-                )
-            """)
-        conn.commit()
+        create_auth_tables()  # Sin parámetros
+        create_user_tables()  # Sin parámetros  
+        create_games_tables() # Sin parámetros
         logger.info("✅ Tablas de la base de datos verificadas/creadas.")
 
     except Exception as e:
         logger.error(f"❌ Error durante la inicialización de la base de datos: {e}")
-        if conn:
-            conn.rollback() # Asegúrate de hacer rollback en caso de error
-    finally:
-        if conn:
-            conn.close()
 
     # Inicializar el sistema de juegos (carga datos de la DB)
     try:
