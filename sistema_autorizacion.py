@@ -1,4 +1,4 @@
-import sqlite3
+import os
 import logging
 from functools import wraps
 from telegram import Update
@@ -12,32 +12,61 @@ logger = logging.getLogger(__name__)
 # Configuración - ID del administrador principal
 ADMIN_USER_ID = 5548909327  # Cambiar por tu user_id de Telegram
 
+def is_postgresql():
+    """Detecta si estamos usando PostgreSQL o SQLite"""
+    return os.environ.get('DATABASE_URL') is not None
+
 def create_auth_tables():
     """Crear tablas para el sistema de autorización"""
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS authorized_chats (
-            chat_id INTEGER PRIMARY KEY,
-            chat_title TEXT,
-            authorized_by INTEGER,
-            authorized_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            status TEXT DEFAULT 'active'
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS auth_requests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER,
-            chat_title TEXT,
-            requested_by INTEGER,
-            requester_username TEXT,
-            requested_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            status TEXT DEFAULT 'pending'
-        )
-    """)
+    if is_postgresql():
+        # Sintaxis PostgreSQL
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS authorized_chats (
+                chat_id BIGINT PRIMARY KEY,
+                chat_title TEXT,
+                authorized_by BIGINT,
+                authorized_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'active'
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS auth_requests (
+                id SERIAL PRIMARY KEY,
+                chat_id BIGINT,
+                chat_title TEXT,
+                requested_by BIGINT,
+                requester_username TEXT,
+                requested_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'pending'
+            )
+        """)
+    else:
+        # Sintaxis SQLite (original)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS authorized_chats (
+                chat_id INTEGER PRIMARY KEY,
+                chat_title TEXT,
+                authorized_by INTEGER,
+                authorized_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'active'
+            )
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS auth_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER,
+                chat_title TEXT,
+                requested_by INTEGER,
+                requester_username TEXT,
+                requested_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'pending'
+            )
+        """)
     
     conn.commit()
     conn.close()
@@ -52,10 +81,18 @@ def is_chat_authorized(chat_id: int) -> bool:
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT 1 FROM authorized_chats WHERE chat_id = ? AND status = 'active'",
-            (chat_id,)
-        )
+        
+        if is_postgresql():
+            cursor.execute(
+                "SELECT 1 FROM authorized_chats WHERE chat_id = %s AND status = 'active'",
+                (chat_id,)
+            )
+        else:
+            cursor.execute(
+                "SELECT 1 FROM authorized_chats WHERE chat_id = ? AND status = 'active'",
+                (chat_id,)
+            )
+        
         result = cursor.fetchone()
         conn.close()
         
@@ -69,18 +106,38 @@ def authorize_chat(chat_id: int, chat_title: str, authorized_by: int):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("""
-            INSERT OR REPLACE INTO authorized_chats 
-            (chat_id, chat_title, authorized_by, authorized_at, status)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'active')
-        """, (chat_id, chat_title, authorized_by))
         
-        # Marcar solicitud como aprobada
-        cursor.execute("""
-            UPDATE auth_requests 
-            SET status = 'approved' 
-            WHERE chat_id = ? AND status = 'pending'
-        """, (chat_id,))
+        if is_postgresql():
+            cursor.execute("""
+                INSERT INTO authorized_chats 
+                (chat_id, chat_title, authorized_by, authorized_at, status)
+                VALUES (%s, %s, %s, CURRENT_TIMESTAMP, 'active')
+                ON CONFLICT (chat_id) DO UPDATE SET
+                    chat_title = EXCLUDED.chat_title,
+                    authorized_by = EXCLUDED.authorized_by,
+                    authorized_at = CURRENT_TIMESTAMP,
+                    status = 'active'
+            """, (chat_id, chat_title, authorized_by))
+            
+            # Marcar solicitud como aprobada
+            cursor.execute("""
+                UPDATE auth_requests 
+                SET status = 'approved' 
+                WHERE chat_id = %s AND status = 'pending'
+            """, (chat_id,))
+        else:
+            cursor.execute("""
+                INSERT OR REPLACE INTO authorized_chats 
+                (chat_id, chat_title, authorized_by, authorized_at, status)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'active')
+            """, (chat_id, chat_title, authorized_by))
+            
+            # Marcar solicitud como aprobada
+            cursor.execute("""
+                UPDATE auth_requests 
+                SET status = 'approved' 
+                WHERE chat_id = ? AND status = 'pending'
+            """, (chat_id,))
         
         conn.commit()
         conn.close()
@@ -140,10 +197,17 @@ async def cmd_solicitar_autorizacion(update: Update, context: ContextTypes.DEFAU
         # Verificar si ya hay una solicitud pendiente
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT 1 FROM auth_requests WHERE chat_id = ? AND status = 'pending'",
-            (chat.id,)
-        )
+        
+        if is_postgresql():
+            cursor.execute(
+                "SELECT 1 FROM auth_requests WHERE chat_id = %s AND status = 'pending'",
+                (chat.id,)
+            )
+        else:
+            cursor.execute(
+                "SELECT 1 FROM auth_requests WHERE chat_id = ? AND status = 'pending'",
+                (chat.id,)
+            )
         
         if cursor.fetchone():
             conn.close()
@@ -155,11 +219,18 @@ async def cmd_solicitar_autorizacion(update: Update, context: ContextTypes.DEFAU
             return
         
         # Crear nueva solicitud
-        cursor.execute("""
-            INSERT INTO auth_requests 
-            (chat_id, chat_title, requested_by, requester_username)
-            VALUES (?, ?, ?, ?)
-        """, (chat.id, chat.title or "Sin título", user.id, user.username or user.first_name or "Sin nombre"))
+        if is_postgresql():
+            cursor.execute("""
+                INSERT INTO auth_requests 
+                (chat_id, chat_title, requested_by, requester_username)
+                VALUES (%s, %s, %s, %s)
+            """, (chat.id, chat.title or "Sin título", user.id, user.username or user.first_name or "Sin nombre"))
+        else:
+            cursor.execute("""
+                INSERT INTO auth_requests 
+                (chat_id, chat_title, requested_by, requester_username)
+                VALUES (?, ?, ?, ?)
+            """, (chat.id, chat.title or "Sin título", user.id, user.username or user.first_name or "Sin nombre"))
         
         conn.commit()
         conn.close()
@@ -242,11 +313,19 @@ async def cmd_aprobar_grupo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Buscar la solicitud
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT chat_title, requester_username 
-            FROM auth_requests 
-            WHERE chat_id = ? AND status = 'pending'
-        """, (chat_id_to_approve,))
+        
+        if is_postgresql():
+            cursor.execute("""
+                SELECT chat_title, requester_username 
+                FROM auth_requests 
+                WHERE chat_id = %s AND status = 'pending'
+            """, (chat_id_to_approve,))
+        else:
+            cursor.execute("""
+                SELECT chat_title, requester_username 
+                FROM auth_requests 
+                WHERE chat_id = ? AND status = 'pending'
+            """, (chat_id_to_approve,))
         
         request = cursor.fetchone()
         if not request:
@@ -292,12 +371,21 @@ async def cmd_ver_solicitudes(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT chat_id, chat_title, requester_username, requested_at
-            FROM auth_requests 
-            WHERE status = 'pending'
-            ORDER BY requested_at ASC
-        """)
+        
+        if is_postgresql():
+            cursor.execute("""
+                SELECT chat_id, chat_title, requester_username, requested_at
+                FROM auth_requests 
+                WHERE status = 'pending'
+                ORDER BY requested_at ASC
+            """)
+        else:
+            cursor.execute("""
+                SELECT chat_id, chat_title, requester_username, requested_at
+                FROM auth_requests 
+                WHERE status = 'pending'
+                ORDER BY requested_at ASC
+            """)
         
         requests = cursor.fetchall()
         conn.close()
@@ -340,13 +428,22 @@ async def cmd_status_auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = get_connection()
         cursor = conn.cursor()
         
-        # Contar grupos autorizados
-        cursor.execute("SELECT COUNT(*) FROM authorized_chats WHERE status = 'active'")
-        authorized_count = cursor.fetchone()[0]
-        
-        # Contar solicitudes pendientes
-        cursor.execute("SELECT COUNT(*) FROM auth_requests WHERE status = 'pending'")
-        pending_count = cursor.fetchone()[0]
+        if is_postgresql():
+            # Contar grupos autorizados
+            cursor.execute("SELECT COUNT(*) FROM authorized_chats WHERE status = 'active'")
+            authorized_count = cursor.fetchone()[0]
+            
+            # Contar solicitudes pendientes
+            cursor.execute("SELECT COUNT(*) FROM auth_requests WHERE status = 'pending'")
+            pending_count = cursor.fetchone()[0]
+        else:
+            # Contar grupos autorizados
+            cursor.execute("SELECT COUNT(*) FROM authorized_chats WHERE status = 'active'")
+            authorized_count = cursor.fetchone()[0]
+            
+            # Contar solicitudes pendientes
+            cursor.execute("SELECT COUNT(*) FROM auth_requests WHERE status = 'pending'")
+            pending_count = cursor.fetchone()[0]
         
         conn.close()
         
