@@ -40,7 +40,7 @@ from juegos import (
     initialize_games_system,
     active_games,
     active_trivias,
-    route_text_message # Asegúrate de que este también esté exportado
+    route_text_message
 )
 
 # Importar sistema de autorización
@@ -54,12 +54,10 @@ from sistema_autorizacion import (
 
 # Importar funciones de db.py
 from db import (
-    create_games_tables,
-    create_auth_tables,
-    create_user_tables,
-    get_connection # Necesario para la inicialización
+    create_all_tables,  # Nueva función unificada
+    get_connection
 )
-from db import get_configured_chats, save_chat_config, get_chat_config # Importar configuración de chats
+from db import get_configured_chats, save_chat_config, get_chat_config
 
 # Configurar logging
 import logging
@@ -68,7 +66,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Cargar configuración del bot - SIMPLIFICADO
+# Cargar configuración del bot
 def load_config():
     """Carga la configuración del bot desde config.py"""
     try:
@@ -141,15 +139,13 @@ async def initialize_bot():
     """Inicializa el bot: crea tablas, carga estados, etc."""
     logger.info("🔄 Inicializando componentes del bot...")
 
-    # Crear todas las tablas necesarias (cada función maneja su propia conexión)
+    # Crear todas las tablas necesarias usando una sola función
     try:
-        create_auth_tables()  # Sin parámetros
-        create_user_tables()  # Sin parámetros  
-        create_games_tables() # Sin parámetros
+        create_all_tables()
         logger.info("✅ Tablas de la base de datos verificadas/creadas.")
-
     except Exception as e:
         logger.error(f"❌ Error durante la inicialización de la base de datos: {e}")
+        raise
 
     # Inicializar el sistema de juegos (carga datos de la DB)
     try:
@@ -184,7 +180,7 @@ def main() -> None:
     health_thread = threading.Thread(
         target=start_health_check_server, 
         args=(health_check_port,),
-        daemon=True  # El hilo se cerrará cuando el programa principal termine
+        daemon=True
     )
     health_thread.start()
     logger.info(f"🌐 Servidor de Health Check iniciado en hilo separado en puerto {health_check_port}")
@@ -250,12 +246,12 @@ def main() -> None:
         logger.info("🎯 Iniciando polling del bot...")
         # Ejecutar bot con configuración mejorada
         app.run_polling(
-            poll_interval=1.0,  # Intervalo de polling
-            timeout=10,         # Timeout para requests
-            bootstrap_retries=-1, # Reintentos infinitos en bootstrap
-            read_timeout=30,    # Timeout de lectura
-            write_timeout=30,   # Timeout de escritura
-            connect_timeout=30  # Timeout de conexión
+            poll_interval=1.0,
+            timeout=10,
+            bootstrap_retries=-1,
+            read_timeout=30,
+            write_timeout=30,
+            connect_timeout=30
         )
         
     except KeyboardInterrupt:
