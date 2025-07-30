@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
 import os
+import threading
+import asyncio
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -58,6 +61,43 @@ except (ImportError, AttributeError):
         print("❌ Error: BOT_TOKEN no está definido.")
         exit()
 
+# Servidor HTTP simple para Render
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'Bot is running!')
+        elif self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b'''
+            <!DOCTYPE html>
+            <html>
+            <head><title>Cinema Bot</title></head>
+            <body>
+                <h1>🎬 Cinema Bot está activo! 🍿</h1>
+                <p>Bot de Telegram funcionando correctamente.</p>
+            </body>
+            </html>
+            ''')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        # Suprimir logs del servidor HTTP
+        pass
+
+def start_health_server():
+    """Inicia servidor HTTP para health checks"""
+    port = int(os.environ.get('PORT', 10000))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    print(f"🌐 Servidor HTTP iniciado en puerto {port}")
+    server.serve_forever()
+
 async def route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Enrutar mensajes de texto según el contexto"""
     chat_id = update.effective_chat.id
@@ -69,11 +109,53 @@ async def route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Si no hay juegos, procesar hashtags
         await handle_hashtags(update, context)
 
+def create_games_tables():
+    """Crear tablas específicas para juegos"""
+    try:
+        from db import get_connection
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Tabla de juegos activos
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS active_games (
+                chat_id BIGINT PRIMARY KEY,
+                juego VARCHAR(50),
+                respuesta TEXT,
+                pistas TEXT,
+                intentos INTEGER DEFAULT 0,
+                started_by BIGINT,
+                last_activity FLOAT
+            )
+        """)
+        
+        # Tabla de trivias activas
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS active_trivias (
+                chat_id BIGINT PRIMARY KEY,
+                pregunta TEXT,
+                respuesta TEXT,
+                start_time FLOAT,
+                started_by BIGINT
+            )
+        """)
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("✅ Tablas de juegos creadas")
+        
+    except Exception as e:
+        print(f"❌ Error creando tablas de juegos: {e}")
+
 async def initialize_bot():
     """Función para inicializar el bot"""
     print("🔧 Creando tablas de base de datos...")
     from db import create_tables
     create_tables()
+    
+    print("🎮 Creando tablas de juegos...")
+    create_games_tables()
     
     print("🔐 Creando tablas de autorización...")
     create_auth_tables()
@@ -85,6 +167,11 @@ async def initialize_bot():
 
 def main():
     """Función principal del bot"""
+    # Iniciar servidor HTTP en thread separado (para Render)
+    print("🚀 Iniciando servidor HTTP...")
+    http_thread = threading.Thread(target=start_health_server, daemon=True)
+    http_thread.start()
+    
     # Crear aplicación
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -122,7 +209,6 @@ def main():
     print("🚀 Iniciando bot...")
     
     # Inicializar bot de forma síncrona
-    import asyncio
     try:
         # Para Render y entornos de producción
         loop = asyncio.new_event_loop()
@@ -133,7 +219,17 @@ def main():
         app.run_polling()
     except RuntimeError:
         # Alternativa para entornos locales
-        asyncio.run(initialize_bot())
+        try:
+            asyncio.run(initialize_bot())
+        except RuntimeError:
+            # Si ya hay un loop corriendo
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Crear una nueva tarea
+                task = asyncio.create_task(initialize_bot())
+                loop.run_until_complete(task)
+            else:
+                loop.run_until_complete(initialize_bot())
         app.run_polling()
 
 if __name__ == "__main__":
